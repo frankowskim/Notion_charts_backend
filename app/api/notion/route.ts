@@ -112,7 +112,8 @@ export async function GET() {
 
     return NextResponse.json(charts, {
       headers: {
-        'Access-Control-Allow-Origin': 'http://localhost:5173',
+        'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
+
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
       },
     });
