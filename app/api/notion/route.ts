@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { Client } from '@notionhq/client';
 
+const FRONTEND_URL = 'https://notioncharts.netlify.app';
+
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 export async function GET() {
@@ -112,8 +114,7 @@ export async function GET() {
 
     return NextResponse.json(charts, {
       headers: {
-        'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
-
+        'Access-Control-Allow-Origin': FRONTEND_URL,
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
       },
     });
@@ -122,7 +123,7 @@ export async function GET() {
     return NextResponse.json({ error: err.message }, {
       status: 500,
       headers: {
-        'Access-Control-Allow-Origin': 'http://localhost:5173',
+        'Access-Control-Allow-Origin': FRONTEND_URL,
       }
     });
   }
@@ -132,7 +133,7 @@ export async function GET() {
 export function OPTIONS() {
   return NextResponse.json(null, {
     headers: {
-      'Access-Control-Allow-Origin': 'http://localhost:5173',
+      'Access-Control-Allow-Origin': FRONTEND_URL,
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
