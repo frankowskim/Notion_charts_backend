@@ -8,7 +8,7 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 // 🧠 Cache
 let cache: any = null;
 let lastFetchTime = 0;
-const CACHE_DURATION = 60 * 1000; // 1 minuta
+const CACHE_DURATION = 30 * 1000; // 1 minuta
 
 export async function GET() {
   // ⏳ Zwróć dane z cache jeśli aktualne
@@ -34,7 +34,7 @@ export async function GET() {
           is_not_empty: true
         }
       },
-      page_size: 100, // zwiększamy zakres jeśli masz więcej danych
+      page_size: 50, // zwiększamy zakres jeśli masz więcej danych
     });
 
     const allTasks = response.results;
