@@ -5,12 +5,36 @@ const FRONTEND_URL = 'https://notioncharts.netlify.app';
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
+// 🧠 Cache
+let cache: any = null;
+let lastFetchTime = 0;
+const CACHE_DURATION = 60 * 1000; // 1 minuta
+
 export async function GET() {
+  // ⏳ Zwróć dane z cache jeśli aktualne
+  if (cache && Date.now() - lastFetchTime < CACHE_DURATION) {
+    console.log("⚡️ Zwracam dane z cache");
+    return NextResponse.json(cache, {
+      headers: {
+        'Access-Control-Allow-Origin': FRONTEND_URL,
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      },
+    });
+  }
+
   try {
     const databaseId = process.env.NOTION_DB_ID!;
+
+    // ✅ Pobieramy tylko zadania ze statusem (czyli aktywne)
     const response = await notion.databases.query({
       database_id: databaseId,
-      page_size: 100,
+      filter: {
+        property: 'Status',
+        select: {
+          is_not_empty: true
+        }
+      },
+      page_size: 100, // zwiększamy zakres jeśli masz więcej danych
     });
 
     const allTasks = response.results;
@@ -26,8 +50,6 @@ export async function GET() {
       const slotStr = task.properties.Slot?.select?.name || null;
       const slot = slotStr ? parseInt(slotStr, 10) : null;
 
-      console.log(`Task: ${title} | ParentId: ${parentId} | IsSubTask: ${isSubTask}`);
-
       taskMap.set(id, {
         id,
         parentId,
@@ -39,18 +61,13 @@ export async function GET() {
       });
     });
 
-    // Zbuduj drzewo
+    // 🔗 Budujemy strukturę nadrzędną
     taskMap.forEach(task => {
-      if (task.parentId) {
-        if (taskMap.has(task.parentId)) {
-          taskMap.get(task.parentId).children.push(task.id);
-        } else {
-          console.warn(`Rodzic z ID ${task.parentId} dla zadania ${task.title} nie istnieje w mapie!`);
-        }
+      if (task.parentId && taskMap.has(task.parentId)) {
+        taskMap.get(task.parentId).children.push(task.id);
       }
     });
 
-    // Funkcja do zbierania potomków
     function getDescendants(taskId: string): string[] {
       const descendants: string[] = [];
       const stack = [taskId];
@@ -87,12 +104,8 @@ export async function GET() {
         };
 
         for (const t of relevantTasks) {
-          console.log(`[${task.title}] ➜ zadanie "${t.title}" ma status: "${t.status}"`);
-
           if (t.status in statusCounts) {
             statusCounts[t.status]++;
-          } else {
-            console.warn(`⚠️ Nieznany status "${t.status}" dla zadania "${t.title}"`);
           }
         }
 
@@ -104,13 +117,17 @@ export async function GET() {
       }
     });
 
-    // Sortowanie po slocie (null na końcu)
+    // 📊 Sortowanie po slocie (null na koniec)
     charts.sort((a, b) => {
       if (a.slot === null && b.slot === null) return 0;
       if (a.slot === null) return 1;
       if (b.slot === null) return -1;
       return a.slot - b.slot;
     });
+
+    // 💾 Cache danych
+    cache = charts;
+    lastFetchTime = Date.now();
 
     return NextResponse.json(charts, {
       headers: {
@@ -129,7 +146,7 @@ export async function GET() {
   }
 }
 
-// Obsługa preflight CORS
+// 🌐 Obsługa preflight CORS
 export function OPTIONS() {
   return NextResponse.json(null, {
     headers: {
