@@ -8,7 +8,7 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 // 🧠 Cache
 let cache: any = null;
 let lastFetchTime = 0;
-const CACHE_DURATION = 30 * 1000; // 1 minuta
+const CACHE_DURATION = 10 * 1000; // 1 minuta
 
 export async function GET() {
   // ⏳ Zwróć dane z cache jeśli aktualne
