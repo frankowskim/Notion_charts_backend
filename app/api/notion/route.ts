@@ -8,26 +8,26 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 // 🧠 Cache
 let cache: any = null;
 let lastFetchTime = 0;
-const CACHE_DURATION = 1 * 1000; // 1 minuta
-let lastModifiedTimestamp = Date.now(); // Nowa zmienna do przechowywania timestampu
+const CACHE_DURATION = 1 * 1000; // 1 sekunda
+let lastModifiedTimestamp = Date.now(); // Zmienna przechowująca czas ostatniej zmiany
 
 export async function GET() {
   // ⏳ Zwróć dane z cache jeśli aktualne
   if (cache && Date.now() - lastFetchTime < CACHE_DURATION) {
     console.log("⚡️ Zwracam dane z cache");
+
     return NextResponse.json(cache, {
-  headers: {
-    'Access-Control-Allow-Origin': FRONTEND_URL,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'X-Last-Modified': lastModifiedTimestamp.toString(), // <-- dodany nagłówek
-  },
-});
+      headers: {
+        'Access-Control-Allow-Origin': FRONTEND_URL,
+        'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'X-Last-Modified': lastModifiedTimestamp.toString(), // <-- nowy nagłówek
+      },
+    });
   }
 
   try {
     const databaseId = process.env.NOTION_DB_ID!;
 
-    // ✅ Pobieramy tylko zadania ze statusem (czyli aktywne)
     const response = await notion.databases.query({
       database_id: databaseId,
       filter: {
@@ -36,7 +36,7 @@ export async function GET() {
           is_not_empty: true
         }
       },
-      page_size: 50, // zwiększamy zakres jeśli masz więcej danych
+      page_size: 50,
     });
 
     const allTasks = response.results;
@@ -63,7 +63,7 @@ export async function GET() {
       });
     });
 
-    // 🔗 Budujemy strukturę nadrzędną
+    // 🔗 Budowanie struktury zagnieżdżonej
     taskMap.forEach(task => {
       if (task.parentId && taskMap.has(task.parentId)) {
         taskMap.get(task.parentId).children.push(task.id);
@@ -119,7 +119,6 @@ export async function GET() {
       }
     });
 
-    // 📊 Sortowanie po slocie (null na koniec)
     charts.sort((a, b) => {
       if (a.slot === null && b.slot === null) return 0;
       if (a.slot === null) return 1;
@@ -127,15 +126,16 @@ export async function GET() {
       return a.slot - b.slot;
     });
 
-    // 💾 Cache danych
+    // 💾 Aktualizacja cache i timestampu
     cache = charts;
     lastFetchTime = Date.now();
-    lastModifiedTimestamp = Date.now(); // Aktualizuj timestamp po udanym pobraniu danych
+    lastModifiedTimestamp = Date.now(); // <- aktualizacja timestampu
 
     return NextResponse.json(charts, {
       headers: {
         'Access-Control-Allow-Origin': FRONTEND_URL,
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
+        'X-Last-Modified': lastModifiedTimestamp.toString(), // <- dodany nagłówek
       },
     });
   } catch (err: any) {
@@ -147,16 +147,6 @@ export async function GET() {
       }
     });
   }
-}
-
-// Nowy endpoint do zwracania timestampu ostatniej modyfikacji
-export async function GET_TIMESTAMP() {
-  return NextResponse.json({ timestamp: lastModifiedTimestamp }, {
-    headers: {
-      'Access-Control-Allow-Origin': FRONTEND_URL,
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    },
-  });
 }
 
 // 🌐 Obsługa preflight CORS
