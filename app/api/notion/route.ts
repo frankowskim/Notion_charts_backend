@@ -9,17 +9,19 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 let cache: any = null;
 let lastFetchTime = 0;
 const CACHE_DURATION = 1 * 1000; // 1 minuta
+let lastModifiedTimestamp = Date.now(); // Nowa zmienna do przechowywania timestampu
 
 export async function GET() {
   // ⏳ Zwróć dane z cache jeśli aktualne
   if (cache && Date.now() - lastFetchTime < CACHE_DURATION) {
     console.log("⚡️ Zwracam dane z cache");
     return NextResponse.json(cache, {
-      headers: {
-        'Access-Control-Allow-Origin': FRONTEND_URL,
-        'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      },
-    });
+  headers: {
+    'Access-Control-Allow-Origin': FRONTEND_URL,
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'X-Last-Modified': lastModifiedTimestamp.toString(), // <-- dodany nagłówek
+  },
+});
   }
 
   try {
@@ -128,6 +130,7 @@ export async function GET() {
     // 💾 Cache danych
     cache = charts;
     lastFetchTime = Date.now();
+    lastModifiedTimestamp = Date.now(); // Aktualizuj timestamp po udanym pobraniu danych
 
     return NextResponse.json(charts, {
       headers: {
@@ -144,6 +147,16 @@ export async function GET() {
       }
     });
   }
+}
+
+// Nowy endpoint do zwracania timestampu ostatniej modyfikacji
+export async function GET_TIMESTAMP() {
+  return NextResponse.json({ timestamp: lastModifiedTimestamp }, {
+    headers: {
+      'Access-Control-Allow-Origin': FRONTEND_URL,
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    },
+  });
 }
 
 // 🌐 Obsługa preflight CORS
