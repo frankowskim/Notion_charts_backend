@@ -9,25 +9,34 @@ const notion = new Client({ auth: process.env.NOTION_TOKEN });
 let cache: any = null;
 let lastFetchTime = 0;
 const CACHE_DURATION = 1 * 1000; // 1 sekunda
-let lastModifiedTimestamp = Date.now(); // Zmienna przechowująca czas ostatniej zmiany
+let lastModifiedTimestamp = Date.now();
+
+// Pomocnicza funkcja do porównania dwóch chartów (po title) i zwrócenia różnic w danych
+function getChartDiff(oldChart: any, newChart: any) {
+  if (!oldChart || !newChart) return null;
+  const changes: Record<string, number> = {};
+  for (const { label, value } of newChart.data) {
+    const oldValue = oldChart.data.find((d: any) => d.label === label)?.value ?? 0;
+    if (oldValue !== value) changes[label] = value;
+  }
+  return Object.keys(changes).length > 0 ? changes : null;
+}
 
 export async function GET() {
-  // ⏳ Zwróć dane z cache jeśli aktualne
+  // Zwróć dane z cache jeśli aktualne
   if (cache && Date.now() - lastFetchTime < CACHE_DURATION) {
     console.log("⚡️ Zwracam dane z cache");
-
     return NextResponse.json(cache, {
       headers: {
         'Access-Control-Allow-Origin': FRONTEND_URL,
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'X-Last-Modified': lastModifiedTimestamp.toString(), // <-- nowy nagłówek
+        'X-Last-Modified': lastModifiedTimestamp.toString(),
       },
     });
   }
 
   try {
     const databaseId = process.env.NOTION_DB_ID!;
-
     const response = await notion.databases.query({
       database_id: databaseId,
       filter: {
@@ -40,7 +49,6 @@ export async function GET() {
     });
 
     const allTasks = response.results;
-
     const taskMap = new Map();
 
     allTasks.forEach((task: any) => {
@@ -63,7 +71,7 @@ export async function GET() {
       });
     });
 
-    // 🔗 Budowanie struktury zagnieżdżonej
+    // Budowanie struktury zagnieżdżonej
     taskMap.forEach(task => {
       if (task.parentId && taskMap.has(task.parentId)) {
         taskMap.get(task.parentId).children.push(task.id);
@@ -73,7 +81,6 @@ export async function GET() {
     function getDescendants(taskId: string): string[] {
       const descendants: string[] = [];
       const stack = [taskId];
-
       while (stack.length > 0) {
         const currentId = stack.pop();
         const currentTask = taskMap.get(currentId);
@@ -84,11 +91,10 @@ export async function GET() {
           stack.push(childId);
         }
       }
-
       return descendants;
     }
 
-    const charts: { title: string; slot: number | null; data: { label: string; value: number }[] }[] = [];
+    const newCharts: { title: string; slot: number | null; data: { label: string; value: number }[] }[] = [];
 
     taskMap.forEach(task => {
       if (!task.isSubTask) {
@@ -111,7 +117,7 @@ export async function GET() {
           }
         }
 
-        charts.push({
+        newCharts.push({
           title: task.title,
           slot: task.slot,
           data: Object.entries(statusCounts).map(([label, value]) => ({ label, value })),
@@ -119,23 +125,42 @@ export async function GET() {
       }
     });
 
-    charts.sort((a, b) => {
+    newCharts.sort((a, b) => {
       if (a.slot === null && b.slot === null) return 0;
       if (a.slot === null) return 1;
       if (b.slot === null) return -1;
       return a.slot - b.slot;
     });
 
-    // 💾 Aktualizacja cache i timestampu
-    cache = charts;
-    lastFetchTime = Date.now();
-    lastModifiedTimestamp = Date.now(); // <- aktualizacja timestampu
+    // Oblicz zmiany (diff) między cache a nowymi danymi
+    let changes: { [title: string]: Record<string, number> } = {};
+    if (cache) {
+      newCharts.forEach(newChart => {
+        const oldChart = cache.find((c: any) => c.title === newChart.title);
+        const diff = getChartDiff(oldChart, newChart);
+        if (diff) {
+          changes[newChart.title] = diff;
+        }
+      });
+    } else {
+      // Jeśli brak cache to traktujemy wszystko jako zmiany
+      newCharts.forEach(c => {
+        changes[c.title] = c.data.reduce((acc, d) => {
+          acc[d.label] = d.value;
+          return acc;
+        }, {} as Record<string, number>);
+      });
+    }
 
-    return NextResponse.json(charts, {
+    cache = newCharts;
+    lastFetchTime = Date.now();
+    lastModifiedTimestamp = Date.now();
+
+    return NextResponse.json({ charts: newCharts, changes }, {
       headers: {
         'Access-Control-Allow-Origin': FRONTEND_URL,
         'Access-Control-Allow-Methods': 'GET, OPTIONS',
-        'X-Last-Modified': lastModifiedTimestamp.toString(), // <- dodany nagłówek
+        'X-Last-Modified': lastModifiedTimestamp.toString(),
       },
     });
   } catch (err: any) {
@@ -149,7 +174,6 @@ export async function GET() {
   }
 }
 
-// 🌐 Obsługa preflight CORS
 export function OPTIONS() {
   return NextResponse.json(null, {
     headers: {
