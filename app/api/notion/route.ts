@@ -9,16 +9,15 @@ interface MasterDBItem {
   active: boolean;
 }
 
-interface ChartItem {
-  id: string;
-  title: string;
-  slot: string | null;
-  value: number | null;
+interface ChartDataPoint {
+  label: string;
+  value: number;
 }
 
-interface ChartsGroupedResponse {
-  databaseName: string;
-  items: ChartItem[];
+interface ChartItem {
+  title: string; // "NazwaBazy::NazwaWykresu"
+  slot: number | null;
+  data: ChartDataPoint[];
 }
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
@@ -112,37 +111,82 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     .filter((db) => !!db.databaseId && db.active);
 }
 
-async function getChartData(databaseId: string): Promise<ChartItem[]> {
-  const pages = await getAllPages(databaseId);
-
-  return pages.map((page) => {
-    const titleProp = page.properties['Name'];
-    const slotProp = page.properties['Slot'];
-    const valueProp = page.properties['Value'];
-
-    let title = '';
-    if (titleProp && titleProp.type === 'title') {
-      title = titleProp.title.map((t) => t.plain_text).join('');
-    }
-
-    const slot = slotProp && slotProp.type === 'select'
-      ? slotProp.select?.name ?? null
-      : null;
-
-    const value = valueProp && valueProp.type === 'number'
-      ? valueProp.number
-      : null;
-
-    return {
-      id: page.id,
-      title,
-      slot,
-      value,
-    };
-  });
+function getTitle(page: PageObjectResponse): string {
+  const titleProp = page.properties['Name'];
+  if (titleProp && titleProp.type === 'title') {
+    return titleProp.title.map(t => t.plain_text).join('');
+  }
+  return '';
 }
 
-// CORS headers
+function getValue(page: PageObjectResponse): number | null {
+  const valueProp = page.properties['Value'];
+  if (valueProp && valueProp.type === 'number') {
+    return valueProp.number;
+  }
+  return null;
+}
+
+function getSlotNumber(page: PageObjectResponse): number | null {
+  const slotProp = page.properties['Slot'];
+  if (slotProp && slotProp.type === 'select' && slotProp.select?.name) {
+    const num = parseInt(slotProp.select.name, 10);
+    return isNaN(num) ? null : num;
+  }
+  return null;
+}
+
+function getParentId(page: PageObjectResponse): string | null {
+  const parentProp = page.properties['Parent'];
+  if (parentProp && parentProp.type === 'relation' && parentProp.relation.length > 0) {
+    return parentProp.relation[0].id;
+  }
+  return null;
+}
+
+async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
+  const pages = await getAllPages(databaseId);
+
+  const parents = pages.filter(p => getSlotNumber(p) !== null);
+  const subtasks = pages.filter(p => getSlotNumber(p) === null);
+
+  const parentsMap: Record<string, ChartItem> = {};
+
+  // Inicjalizacja rodziców
+  for (const parent of parents) {
+    const slot = getSlotNumber(parent);
+    if (slot === null) continue;
+    parentsMap[parent.id] = {
+      title: `${databaseName}::${getTitle(parent)}`,
+      slot,
+      data: [],
+    };
+    const parentValue = getValue(parent);
+    if (parentValue !== null) {
+      parentsMap[parent.id].data.push({
+        label: getTitle(parent),
+        value: parentValue,
+      });
+    }
+  }
+
+  // Dodawanie subtasków do rodzica
+  for (const subtask of subtasks) {
+    const parentId = getParentId(subtask);
+    if (!parentId || !parentsMap[parentId]) continue;
+    const value = getValue(subtask);
+    if (value !== null) {
+      parentsMap[parentId].data.push({
+        label: getTitle(subtask),
+        value,
+      });
+    }
+  }
+
+  return Object.values(parentsMap).sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
+}
+
+// CORS
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -152,18 +196,15 @@ const CORS_HEADERS = {
 export async function GET() {
   try {
     const databases = await getDatabasesFromMaster();
-    const results: ChartsGroupedResponse[] = [];
+    const allCharts: ChartItem[] = [];
 
     for (const db of databases) {
       if (!db.databaseId) continue;
-      const items = await getChartData(db.databaseId);
-      results.push({
-        databaseName: db.name,
-        items,
-      });
+      const charts = await getChartData(db.databaseId, db.name);
+      allCharts.push(...charts);
     }
 
-    return new NextResponse(JSON.stringify(results), {
+    return new NextResponse(JSON.stringify({ charts: allCharts }), {
       status: 200,
       headers: {
         ...CORS_HEADERS,
