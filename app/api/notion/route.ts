@@ -150,9 +150,18 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   const parents = pages.filter(p => getSlotNumber(p) !== null);
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
 
+  console.log(`Rodzice (${parents.length}):`);
+  for (const p of parents) {
+    console.log(`  - ${getTitle(p)} (slot: ${getSlotNumber(p)}) value: ${getValue(p)}`);
+  }
+
+  console.log(`Subtaski (${subtasks.length}):`);
+  for (const s of subtasks) {
+    console.log(`  - ${getTitle(s)} parent: ${getParentId(s)} value: ${getValue(s)}`);
+  }
+
   const parentsMap: Record<string, ChartItem> = {};
 
-  // Inicjalizacja rodziców
   for (const parent of parents) {
     const slot = getSlotNumber(parent);
     if (slot === null) continue;
@@ -170,7 +179,6 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
     }
   }
 
-  // Dodawanie subtasków do rodzica
   for (const subtask of subtasks) {
     const parentId = getParentId(subtask);
     if (!parentId || !parentsMap[parentId]) continue;
