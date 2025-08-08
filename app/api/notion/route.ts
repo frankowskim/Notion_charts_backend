@@ -1,68 +1,100 @@
-import { NextResponse } from 'next/server';
+import type { NextApiRequest, NextApiResponse } from 'next';
 import { Client } from '@notionhq/client';
+import {
+  PageObjectResponse,
+  PartialPageObjectResponse,
+} from '@notionhq/client/build/src/api-endpoints';
+
+// Wyciąga 32-znakowy ID z URL
+function extractNotionIdFromUrl(url: string): string | null {
+  try {
+    const parsedUrl = new URL(url);
+    const pathSegments = parsedUrl.pathname.split('/');
+    for (const segment of pathSegments) {
+      if (segment.length === 32 && /^[0-9a-f]{32}$/.test(segment)) {
+        return segment;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Zamienia 32-znakowy ID na UUID (z myślnikami)
+function expandNotionId(id: string): string {
+  return id.replace(
+    /^(.{8})(.{4})(.{4})(.{4})(.{12})$/,
+    '$1-$2-$3-$4-$5'
+  );
+}
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-const MASTER_DB_ID = process.env.NOTION_MASTER_DB_ID!;
 
+type Data = {
+  data?: Array<{
+    id: string;
+    nazwa: string | null;
+    link: string | null;
+    wlasciciel: string | null;
+    aktywna: boolean;
+    opis: string | null;
+  }>;
+  error?: string;
+};
 
-
-function getCheckbox(prop: any): boolean {
-  return prop?.type === 'checkbox' ? prop.checkbox : false;
-}
-
-function getSelectName(prop: any): string | null {
-  return prop?.type === 'select' && prop.select ? prop.select.name : null;
-}
-
-function getRichText(prop: any): string {
-  if (prop?.type === 'rich_text') {
-    return prop.rich_text.map((rt: any) => rt.plain_text).join('');
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse<Data>
+) {
+  const dbUrl = process.env.NOTION_MASTER_DB_URL;
+  if (!dbUrl) {
+    return res.status(500).json({ error: 'Brak NOTION_MASTER_DB_URL w środowisku' });
   }
-  return '';
-}
 
-function getTitle(prop: any): string {
-  if (prop?.type === 'title') {
-    return prop.title.map((t: any) => t.plain_text).join('');
+  const compressedId = extractNotionIdFromUrl(dbUrl);
+  if (!compressedId) {
+    return res.status(400).json({ error: 'Niepoprawny URL bazy Notion' });
   }
-  return '';
-}
 
-function getUrl(prop: any): string | null {
-  return prop?.type === 'url' && prop.url ? prop.url : null;
-}
+  const notionDbId = expandNotionId(compressedId);
 
-export async function GET() {
   try {
-    const response = await notion.databases.query({
-      database_id: MASTER_DB_ID,
-      // filter: {
-      //   property: 'Aktywna',
-      //   checkbox: {
-      //     equals: true,
-      //   },
-      // },
-      page_size: 100,
-    });
+    const response = await notion.databases.query({ database_id: notionDbId });
 
-    console.log('Master DB query result:', response.results);
+    // Filtrowanie wyników - mamy union typów, sprawdzamy czy properties istnieje i czy to PageObjectResponse
+    const pages = response.results.filter(
+      (page): page is PageObjectResponse => 'properties' in page
+    );
 
-    const bases = response.results.map((page: any) => {
+    const results = pages.map((page) => {
       const props = page.properties;
 
+      // Tutaj zwracamy wartości, uwzględniając możliwą nieobecność danych
       return {
         id: page.id,
-        name: getTitle(props['Nazwa bazy']) || getRichText(props['Nazwa bazy']),
-        url: getUrl(props['Link do bazy']),
-        owner: getSelectName(props['Właściciel']),
-        description: getRichText(props['Opis']),
-        active: getCheckbox(props['Aktywna']),
+        nazwa: props['Nazwa bazy']?.type === 'title' && props['Nazwa bazy'].title.length > 0
+          ? props['Nazwa bazy'].title[0].plain_text
+          : null,
+        link: props['Link do bazy']?.type === 'url'
+          ? props['Link do bazy'].url
+          : null,
+        wlasciciel: props['Właściciel']?.type === 'select' && props['Właściciel'].select
+          ? props['Właściciel'].select.name
+          : null,
+        aktywna: props['Aktywna']?.type === 'checkbox'
+          ? props['Aktywna'].checkbox
+          : false,
+        opis: props['Opis']?.type === 'rich_text' && props['Opis'].rich_text.length > 0
+          ? props['Opis'].rich_text[0].plain_text
+          : null,
       };
     });
 
-    return NextResponse.json({ bases });
+    return res.status(200).json({ data: results });
   } catch (error) {
     console.error('❌ Błąd podczas pobierania master bazy:', error);
-    return NextResponse.json({ error: 'Błąd serwera' }, { status: 500 });
+    const message = error instanceof Error ? error.message : 'Nieznany błąd';
+    return res.status(500).json({ error: message });
   }
 }
