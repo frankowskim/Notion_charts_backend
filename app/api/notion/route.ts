@@ -74,8 +74,6 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     .map((page) => {
       const props = page.properties;
 
-      console.log(`📄 Page ${page.id} ma właściwości:`, Object.keys(props));
-
       const nameProp = props['Nazwa bazy'];
       const urlProp = props['Link do bazy'];
       const activeProp = props['Aktywna'];
@@ -137,7 +135,7 @@ function getSlotNumber(page: PageObjectResponse): number | null {
 }
 
 function getParentId(page: PageObjectResponse): string | null {
-  const parentProp = page.properties['Parent'];
+  const parentProp = page.properties['Parent item'];
   if (parentProp && parentProp.type === 'relation' && parentProp.relation.length > 0) {
     return parentProp.relation[0].id;
   }
@@ -149,16 +147,6 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
 
   const parents = pages.filter(p => getSlotNumber(p) !== null);
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
-
-  console.log(`Rodzice (${parents.length}):`);
-  for (const p of parents) {
-    console.log(`  - ${getTitle(p)} (slot: ${getSlotNumber(p)}) value: ${getValue(p)}`);
-  }
-
-  console.log(`Subtaski (${subtasks.length}):`);
-  for (const s of subtasks) {
-    console.log(`  - ${getTitle(s)} parent: ${getParentId(s)} value: ${getValue(s)}`);
-  }
 
   const parentsMap: Record<string, ChartItem> = {};
 
@@ -194,7 +182,6 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   return Object.values(parentsMap).sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
 }
 
-// CORS
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
