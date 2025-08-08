@@ -4,6 +4,8 @@ import { Client } from '@notionhq/client';
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 const MASTER_DB_ID = process.env.NOTION_MASTER_DB_ID!;
 
+
+
 function getCheckbox(prop: any): boolean {
   return prop?.type === 'checkbox' ? prop.checkbox : false;
 }
@@ -42,6 +44,8 @@ export async function GET() {
       },
       page_size: 100,
     });
+
+    console.log('Master DB query result:', response.results);
 
     const bases = response.results.map((page: any) => {
       const props = page.properties;
