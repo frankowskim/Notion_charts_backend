@@ -75,23 +75,29 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     .map((page) => {
       const props = page.properties;
 
+      // 🔍 Logowanie dostępnych property w danej stronie
+      console.log(`📄 Page ${page.id} ma właściwości:`, Object.keys(props));
+
       const nameProp = props['Nazwa bazy'];
       const urlProp = props['Link do bazy'];
       const activeProp = props['Aktywna'];
 
       const name =
-        nameProp && nameProp.type === 'rich_text'
+        nameProp?.type === 'rich_text'
           ? nameProp.rich_text.map((t) => t.plain_text).join('')
           : '';
 
       const url =
-        urlProp && urlProp.type === 'url'
+        urlProp?.type === 'url'
           ? urlProp.url ?? ''
           : '';
 
       const databaseId = url ? extractDatabaseIdFromUrl(url) : '';
 
-      const active = activeProp && activeProp.type === 'checkbox' ? activeProp.checkbox : false;
+      const active =
+        activeProp?.type === 'checkbox'
+          ? activeProp.checkbox
+          : false;
 
       return {
         id: page.id,
@@ -102,6 +108,7 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     })
     .filter((db) => !!db.databaseId && db.active);
 }
+
 
 async function getChartData(databaseId: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
