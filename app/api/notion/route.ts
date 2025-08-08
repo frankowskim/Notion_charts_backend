@@ -1,70 +1,132 @@
-import { NextResponse } from "next/server";
-import { Client } from "@notionhq/client";
+import { NextRequest, NextResponse } from 'next/server';
+import { Client, PageObjectResponse } from '@notionhq/client';
 
-// Typ jednej bazy z Master DB
-type ActiveBase = {
-  name: string;
-  link: string;
-};
-
-// Funkcja wyciągająca ID z linku do bazy Notion
-function extractDatabaseIdFromUrl(url: string): string {
-  const match = url.match(/([a-f0-9]{32})/);
-  if (!match) {
-    throw new Error("Nie udało się znaleźć ID bazy w podanym URL");
-  }
-  const rawId = match[1];
-  // Wstaw myślniki w formacie UUID
-  return `${rawId.slice(0, 8)}-${rawId.slice(8, 12)}-${rawId.slice(12, 16)}-${rawId.slice(16, 20)}-${rawId.slice(20)}`;
+// Typy na dane frontend
+interface ChartData {
+  label: string;
+  value: number;
 }
 
-export async function GET() {
-  try {
-    const notion = new Client({
-      auth: process.env.NOTION_TOKEN,
+interface ChartItem {
+  title: string;
+  slot: number | null;
+  data: ChartData[];
+}
+
+function extractDatabaseId(notionUrl: string): string | null {
+  const regex = /([0-9a-f]{32})/i;
+  const match = notionUrl.match(regex);
+  if (!match) return null;
+  return match[1].replace(
+    /([0-9a-f]{8})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})/,
+    '$1-$2-$3-$4-$5'
+  );
+}
+
+const notion = new Client({
+  auth: process.env.NOTION_TOKEN,
+});
+
+async function fetchDatabaseItems(databaseId: string): Promise<ChartItem[]> {
+  const results: ChartItem[] = [];
+  let cursor: string | undefined = undefined;
+
+  do {
+    const response = await notion.databases.query({
+      database_id: databaseId,
+      start_cursor: cursor,
     });
 
-    if (!process.env.NOTION_MASTER_DB_URL) {
-      return NextResponse.json(
-        { error: "Brak zmiennej środowiskowej NOTION_MASTER_DB_URL" },
-        { status: 500 }
-      );
+    for (const page of response.results) {
+      // Weryfikacja, czy page jest pełnym PageObjectResponse z properties
+      if (page.object !== 'page') continue;
+      if (!('properties' in page)) continue;
+
+      const pageFull = page as PageObjectResponse;
+
+      const props = pageFull.properties;
+
+      // Title (pole "Name")
+      let title = '';
+      const titleProp = props['Name'];
+      if (titleProp?.type === 'title') {
+        title = titleProp.title.map((t: { plain_text: string }) => t.plain_text).join(' ');
+      }
+
+      // Slot - number lub select
+      let slot: number | null = null;
+      const slotProp = props['Slot'];
+      if (slotProp?.type === 'number' && typeof slotProp.number === 'number') {
+        slot = slotProp.number;
+      } else if (slotProp?.type === 'select' && slotProp.select?.name) {
+        const parsed = parseInt(slotProp.select.name, 10);
+        slot = isNaN(parsed) ? null : parsed;
+      }
+
+      // Data - rich_text JSON
+      let data: ChartData[] = [];
+      const dataProp = props['Data'];
+      if (dataProp?.type === 'rich_text' && dataProp.rich_text.length > 0) {
+        try {
+          const jsonText = dataProp.rich_text.map((t: { plain_text: string }) => t.plain_text).join('');
+          const parsedData = JSON.parse(jsonText);
+          if (Array.isArray(parsedData)) {
+            data = parsedData
+              .filter((item: any) => item.label && typeof item.value === 'number')
+              .map((item: any) => ({
+                label: String(item.label),
+                value: Number(item.value),
+              }));
+          }
+        } catch {
+          // Ignoruj jeśli JSON niepoprawny
+        }
+      }
+
+      results.push({
+        title,
+        slot,
+        data,
+      });
     }
 
-    const masterDbId = extractDatabaseIdFromUrl(process.env.NOTION_MASTER_DB_URL);
+    cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
+  } while (cursor);
 
-    // Pobieramy dane z master DB
-    const masterData = await notion.databases.query({
-      database_id: masterDbId,
-    });
+  return results;
+}
 
-    // Wyciągamy aktywne bazy
-    const activeBases: ActiveBase[] = masterData.results
-      .map((page: any) => {
-        if (!("properties" in page)) return null;
-        const props = page.properties;
+export async function GET(req: NextRequest) {
+  try {
+    const notionDbLinks = process.env.NOTION_DB_LINKS;
+    if (!notionDbLinks) {
+      return NextResponse.json({ error: 'Brak NOTION_DB_LINKS w zmiennych środowiskowych' }, { status: 500 });
+    }
 
-        const link = props["Link do bazy"]?.type === "url" ? props["Link do bazy"].url : null;
-        const active =
-          props["Aktywna"]?.type === "checkbox" ? props["Aktywna"].checkbox : false;
-        const name =
-          props["Nazwa bazy"]?.type === "title"
-            ? props["Nazwa bazy"].title[0]?.plain_text || ""
-            : "";
+    const dbUrls = notionDbLinks.split(',').map(s => s.trim()).filter(Boolean);
+    if (dbUrls.length === 0) {
+      return NextResponse.json({ error: 'NOTION_DB_LINKS jest puste' }, { status: 500 });
+    }
 
-        if (!link || !active || !name) return null;
+    const allCharts: ChartItem[] = [];
+    for (const dbUrl of dbUrls) {
+      const dbId = extractDatabaseId(dbUrl);
+      if (!dbId) continue;
 
-        return { name, link };
-      })
-      .filter((base): base is ActiveBase => base !== null);
+      const items = await fetchDatabaseItems(dbId);
 
-    // Tu możesz chcieć pobrać dane z każdej aktywnej bazy, ale na razie zwracamy tylko listę
-    return NextResponse.json({ bases: activeBases });
-  } catch (error: unknown) {
-    console.error("❌ Błąd backendu:", error);
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Nieznany błąd" },
-      { status: 500 }
-    );
+      // Prefix bazy w tytule wykresu
+      const dbName = dbUrl.split('/').pop()?.slice(0, 6) ?? dbId.slice(0, 6);
+
+      items.forEach(item => {
+        const newTitle = item.title ? `${dbName}::${item.title}` : `${dbName}::Unnamed`;
+        allCharts.push({ ...item, title: newTitle });
+      });
+    }
+
+    return NextResponse.json({ charts: allCharts });
+  } catch (error) {
+    console.error('Błąd backendu:', error);
+    return NextResponse.json({ error: (error as Error).message ?? 'Nieznany błąd' }, { status: 500 });
   }
 }
