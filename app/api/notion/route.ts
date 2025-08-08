@@ -34,6 +34,7 @@ if (!NOTION_MASTER_DB_URL) {
   throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
 }
 
+// Funkcja ekstrakcji ID bazy z pełnego URL Notion (usuwa myślniki)
 function extractDatabaseIdFromUrl(url: string): string {
   try {
     const cleanUrl = url.split('?')[0];
@@ -48,8 +49,7 @@ function extractDatabaseIdFromUrl(url: string): string {
 }
 
 const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
-
-const notion = new Client({ auth: NOTION_TOKEN });
+const notion = new Client({ auth: NOTION_TOKEN as string });
 
 async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
   let cursor: string | undefined = undefined;
@@ -59,7 +59,7 @@ async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
     const response = await notion.databases.query({
       database_id: databaseId,
       start_cursor: cursor,
-    });
+    } as QueryDatabaseParameters);
 
     const fullPages = response.results.filter(
       (p): p is PageObjectResponse => 'properties' in p
@@ -78,27 +78,25 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
   return pages
     .map((page) => {
       const nameProp = page.properties['Nazwa bazy'];
-      const linkProp = page.properties['Link do bazy'];
+      const urlProp = page.properties['Link do bazy'];
       const activeProp = page.properties['Aktywna'];
 
+      // Name (text)
       const name =
-        nameProp?.type === 'rich_text'
+        nameProp.type === 'rich_text'
           ? nameProp.rich_text.map((t) => t.plain_text).join('')
           : '';
 
+      // Database ID extracted from URL (url)
       const url =
-        linkProp?.type === 'url' && typeof linkProp.url === 'string'
-          ? linkProp.url
+        urlProp.type === 'url'
+          ? urlProp.url ?? ''
           : '';
 
-      let databaseId = '';
-      try {
-        databaseId = url ? extractDatabaseIdFromUrl(url) : '';
-      } catch {
-        databaseId = '';
-      }
+      const databaseId = url ? extractDatabaseIdFromUrl(url) : '';
 
-      const active = activeProp?.type === 'checkbox' ? activeProp.checkbox : false;
+      // Active (checkbox)
+      const active = activeProp.type === 'checkbox' ? activeProp.checkbox : false;
 
       return {
         id: page.id,
@@ -119,15 +117,15 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
     const valueProp = page.properties['Value'];
 
     const title =
-      titleProp?.type === 'title'
+      titleProp.type === 'title'
         ? titleProp.title.map((t) => t.plain_text).join('')
         : '';
 
     const slot =
-      slotProp?.type === 'select' ? slotProp.select?.name ?? null : null;
+      slotProp.type === 'select' ? slotProp.select?.name ?? null : null;
 
     const value =
-      valueProp?.type === 'number' ? valueProp.number : null;
+      valueProp.type === 'number' ? valueProp.number : null;
 
     return {
       id: page.id,
@@ -138,11 +136,11 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
   });
 }
 
+const ALLOWED_ORIGIN = 'https://notioncharts.netlify.app';
+
 export async function GET() {
   try {
     const databases = await getDatabasesFromMaster();
-
-    console.log('Databases from master:', databases);
 
     const results: ChartsGroupedResponse[] = [];
 
@@ -155,12 +153,37 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json(results);
+    return new NextResponse(JSON.stringify(results), {
+      status: 200,
+      headers: {
+        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+      },
+    });
   } catch (error) {
     console.error(error);
-    return NextResponse.json(
-      { error: (error as Error).message },
-      { status: 500 }
+    return new NextResponse(
+      JSON.stringify({ error: (error as Error).message }),
+      {
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        },
+      }
     );
   }
+}
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
 }
