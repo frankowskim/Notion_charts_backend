@@ -36,12 +36,12 @@ export async function GET() {
   try {
     const response = await notion.databases.query({
       database_id: MASTER_DB_ID,
-      filter: {
-        property: 'Aktywna',
-        checkbox: {
-          equals: true,
-        },
-      },
+      // filter: {
+      //   property: 'Aktywna',
+      //   checkbox: {
+      //     equals: true,
+      //   },
+      // },
       page_size: 100,
     });
 
