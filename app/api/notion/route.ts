@@ -73,23 +73,25 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
 
   return pages
     .map((page) => {
-      const nameProp = page.properties['Nazwa bazy'];
-      const urlProp = page.properties['Link do bazy'];
-      const activeProp = page.properties['Aktywna'];
+      const props = page.properties;
+
+      const nameProp = props['Nazwa bazy'];
+      const urlProp = props['Link do bazy'];
+      const activeProp = props['Aktywna'];
 
       const name =
-        nameProp.type === 'rich_text'
+        nameProp && nameProp.type === 'rich_text'
           ? nameProp.rich_text.map((t) => t.plain_text).join('')
           : '';
 
       const url =
-        urlProp.type === 'url'
+        urlProp && urlProp.type === 'url'
           ? urlProp.url ?? ''
           : '';
 
       const databaseId = url ? extractDatabaseIdFromUrl(url) : '';
 
-      const active = activeProp.type === 'checkbox' ? activeProp.checkbox : false;
+      const active = activeProp && activeProp.type === 'checkbox' ? activeProp.checkbox : false;
 
       return {
         id: page.id,
