@@ -30,6 +30,7 @@ function expandNotionId(id: string): string {
 
 export async function GET() {
   const dbUrl = process.env.NOTION_MASTER_DB_URL;
+  
   if (!dbUrl) {
     return NextResponse.json({ error: 'Brak NOTION_MASTER_DB_URL w środowisku' }, { status: 500 });
   }
@@ -47,7 +48,7 @@ export async function GET() {
     const pages = response.results.filter(
       (page): page is PageObjectResponse => 'properties' in page
     );
-
+console.log('Pobrane dane z Notion:', JSON.stringify(response, null, 2));
     const results = pages.map((page) => {
       const props = page.properties;
 
