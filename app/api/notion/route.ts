@@ -51,7 +51,6 @@ function extractDatabaseIdFromUrl(url: string): string {
   }
 }
 
-
 const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
 
 const notion = new Client({ auth: NOTION_TOKEN as string });
@@ -84,22 +83,22 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
 
   return pages
     .map((page) => {
-      const nameProp = page.properties['Name'];
-      const dbIdProp = page.properties['Database ID'];
-      const activeProp = page.properties['Active'];
+      const nameProp = page.properties?.['Name'];
+      const dbIdProp = page.properties?.['Database ID'];
+      const activeProp = page.properties?.['Active'];
 
       return {
         id: page.id,
         name:
-          nameProp.type === 'title'
+          nameProp && nameProp.type === 'title'
             ? nameProp.title.map((t) => t.plain_text).join('')
             : '',
         databaseId:
-          dbIdProp.type === 'rich_text'
+          dbIdProp && dbIdProp.type === 'rich_text'
             ? dbIdProp.rich_text.map((t) => t.plain_text).join('')
             : '',
         active:
-          activeProp.type === 'checkbox' ? activeProp.checkbox : false,
+          activeProp && activeProp.type === 'checkbox' ? activeProp.checkbox : false,
       } as MasterDBItem;
     })
     .filter((db) => !!db.databaseId && db.active);
@@ -110,20 +109,20 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
   return pages.map((page) => {
-    const titleProp = page.properties['Name'];
-    const slotProp = page.properties['Slot'];
-    const valueProp = page.properties['Value'];
+    const titleProp = page.properties?.['Name'];
+    const slotProp = page.properties?.['Slot'];
+    const valueProp = page.properties?.['Value'];
 
     const title =
-      titleProp.type === 'title'
+      titleProp && titleProp.type === 'title'
         ? titleProp.title.map((t) => t.plain_text).join('')
         : '';
 
     const slot =
-      slotProp.type === 'select' ? slotProp.select?.name ?? null : null;
+      slotProp && slotProp.type === 'select' ? slotProp.select?.name ?? null : null;
 
     const value =
-      valueProp.type === 'number' ? valueProp.number : null;
+      valueProp && valueProp.type === 'number' ? valueProp.number : null;
 
     return {
       id: page.id,
