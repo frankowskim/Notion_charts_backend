@@ -75,29 +75,32 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     .map((page) => {
       const props = page.properties;
 
-      // 🔍 Logowanie dostępnych property w danej stronie
       console.log(`📄 Page ${page.id} ma właściwości:`, Object.keys(props));
 
       const nameProp = props['Nazwa bazy'];
       const urlProp = props['Link do bazy'];
       const activeProp = props['Aktywna'];
 
-      const name =
-        nameProp?.type === 'rich_text'
-          ? nameProp.rich_text.map((t) => t.plain_text).join('')
-          : '';
+      let name = '';
+      if (nameProp) {
+        if (nameProp.type === 'title' && Array.isArray(nameProp.title)) {
+          name = nameProp.title.map(t => t.plain_text).join('');
+        } else if (nameProp.type === 'rich_text' && Array.isArray(nameProp.rich_text)) {
+          name = nameProp.rich_text.map(t => t.plain_text).join('');
+        }
+      }
 
-      const url =
-        urlProp?.type === 'url'
-          ? urlProp.url ?? ''
-          : '';
+      let url = '';
+      if (urlProp && urlProp.type === 'url') {
+        url = urlProp.url ?? '';
+      }
 
       const databaseId = url ? extractDatabaseIdFromUrl(url) : '';
 
-      const active =
-        activeProp?.type === 'checkbox'
-          ? activeProp.checkbox
-          : false;
+      let active = false;
+      if (activeProp && activeProp.type === 'checkbox') {
+        active = activeProp.checkbox;
+      }
 
       return {
         id: page.id,
@@ -109,7 +112,6 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
     .filter((db) => !!db.databaseId && db.active);
 }
 
-
 async function getChartData(databaseId: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
@@ -118,16 +120,18 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
     const slotProp = page.properties['Slot'];
     const valueProp = page.properties['Value'];
 
-    const title =
-      titleProp.type === 'title'
-        ? titleProp.title.map((t) => t.plain_text).join('')
-        : '';
+    let title = '';
+    if (titleProp && titleProp.type === 'title') {
+      title = titleProp.title.map((t) => t.plain_text).join('');
+    }
 
-    const slot =
-      slotProp.type === 'select' ? slotProp.select?.name ?? null : null;
+    const slot = slotProp && slotProp.type === 'select'
+      ? slotProp.select?.name ?? null
+      : null;
 
-    const value =
-      valueProp.type === 'number' ? valueProp.number : null;
+    const value = valueProp && valueProp.type === 'number'
+      ? valueProp.number
+      : null;
 
     return {
       id: page.id,
@@ -138,7 +142,7 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
   });
 }
 
-// Nagłówki CORS
+// CORS headers
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
