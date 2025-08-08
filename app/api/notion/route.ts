@@ -28,14 +28,14 @@ interface ChartsGroupedResponse {
 }
 
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const MASTER_DB_ID = process.env.NOTION_MASTER_DB_ID;
+const MASTER_DB_ID = process.env.NOTION_MASTER_DB_URL;
 
 // Walidacja zmiennych środowiskowych z nadaniem typu string
 if (!NOTION_TOKEN) {
   throw new Error('Brak NOTION_TOKEN w zmiennych środowiskowych');
 }
 if (!MASTER_DB_ID) {
-  throw new Error('Brak NOTION_MASTER_DB_ID w zmiennych środowiskowych');
+  throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
 }
 
 const notion = new Client({ auth: NOTION_TOKEN as string });
