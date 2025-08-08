@@ -27,18 +27,18 @@ interface ChartsGroupedResponse {
   items: ChartItem[];
 }
 
-const NOTION_API_KEY = process.env.NOTION_API_KEY;
+const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const MASTER_DB_ID = process.env.NOTION_MASTER_DB_ID;
 
 // Walidacja zmiennych środowiskowych z nadaniem typu string
-if (!NOTION_API_KEY) {
-  throw new Error('Brak NOTION_API_KEY w zmiennych środowiskowych');
+if (!NOTION_TOKEN) {
+  throw new Error('Brak NOTION_TOKEN w zmiennych środowiskowych');
 }
 if (!MASTER_DB_ID) {
   throw new Error('Brak NOTION_MASTER_DB_ID w zmiennych środowiskowych');
 }
 
-const notion = new Client({ auth: NOTION_API_KEY as string });
+const notion = new Client({ auth: NOTION_TOKEN as string });
 
 // Funkcja pobierająca wszystkie strony z dowolnej bazy
 async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
