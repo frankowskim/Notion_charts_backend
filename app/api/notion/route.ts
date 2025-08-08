@@ -5,7 +5,8 @@ import {
   PageObjectResponse,
 } from '@notionhq/client/build/src/api-endpoints';
 
-// Typ dla elementów w Master DB
+// Typy pozostają bez zmian
+
 interface MasterDBItem {
   id: string;
   name: string;
@@ -13,7 +14,6 @@ interface MasterDBItem {
   active: boolean;
 }
 
-// Typ dla pojedynczego wpisu wykresu
 interface ChartItem {
   id: string;
   title: string;
@@ -21,22 +21,35 @@ interface ChartItem {
   value: number | null;
 }
 
-// Typ dla odpowiedzi backendu
 interface ChartsGroupedResponse {
   databaseName: string;
   items: ChartItem[];
 }
 
+// Zmienne środowiskowe
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
-const MASTER_DB_ID = process.env.NOTION_MASTER_DB_URL;
+const NOTION_MASTER_DB_URL = process.env.NOTION_MASTER_DB_URL;
 
-// Walidacja zmiennych środowiskowych z nadaniem typu string
 if (!NOTION_TOKEN) {
   throw new Error('Brak NOTION_TOKEN w zmiennych środowiskowych');
 }
-if (!MASTER_DB_ID) {
+if (!NOTION_MASTER_DB_URL) {
   throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
 }
+
+// Funkcja ekstrakcji ID bazy z pełnego URL Notion (usuwa myślniki)
+function extractDatabaseIdFromUrl(url: string): string {
+  // Przykładowy URL: https://www.notion.so/Workspace/Some-Page-Name-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  // ID to ostatnie 32 znaki po ostatnim myślniku, ale może zawierać myślniki, więc je usuwamy.
+  const match = url.match(/([a-f0-9]{32}|[a-f0-9\-]{36})$/i);
+  if (!match) {
+    throw new Error('Nie udało się wyciągnąć ID bazy z NOTION_MASTER_DB_URL');
+  }
+  // Usuwamy myślniki z ID (Notion wymaga 32 znaków hex bez myślników)
+  return match[0].replace(/-/g, '');
+}
+
+const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
 
 const notion = new Client({ auth: NOTION_TOKEN as string });
 
@@ -51,7 +64,6 @@ async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
       start_cursor: cursor,
     });
 
-    // Filtrujemy, aby zostały tylko pełne PageObjectResponse
     const fullPages = response.results.filter(
       (p): p is PageObjectResponse => 'properties' in p
     );
@@ -65,7 +77,7 @@ async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
 
 // Pobranie listy baz z Master DB
 async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
-  const pages = await getAllPages(MASTER_DB_ID as string);
+  const pages = await getAllPages(MASTER_DB_ID);
 
   return pages
     .map((page) => {
@@ -119,7 +131,6 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
   });
 }
 
-// Handler GET
 export async function GET() {
   try {
     const databases = await getDatabasesFromMaster();
