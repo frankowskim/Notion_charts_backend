@@ -119,7 +119,7 @@ function getTitle(page: PageObjectResponse): string {
 
 function getValue(page: PageObjectResponse): number | null {
   const valueProp = page.properties['Value'];
-  if (valueProp && valueProp.type === 'number') {
+  if (valueProp && valueProp.type === 'number' && valueProp.number !== null) {
     return valueProp.number;
   }
   return null;
@@ -145,7 +145,9 @@ function getParentId(page: PageObjectResponse): string | null {
 async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
+  // Rodzice to te, które mają slot ustawiony
   const parents = pages.filter(p => getSlotNumber(p) !== null);
+  // Subtaski to te bez slotu
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
 
   const parentsMap: Record<string, ChartItem> = {};
@@ -153,15 +155,20 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   for (const parent of parents) {
     const slot = getSlotNumber(parent);
     if (slot === null) continue;
+
+    const title = getTitle(parent);
+
     parentsMap[parent.id] = {
-      title: `${databaseName}::${getTitle(parent)}`,
+      title: `${databaseName}::${title}`,
       slot,
       data: [],
     };
+
+    // Dodaj wartość rodzica jako jeden punkt danych, jeśli jest dostępna
     const parentValue = getValue(parent);
     if (parentValue !== null) {
       parentsMap[parent.id].data.push({
-        label: getTitle(parent),
+        label: title || 'Brak nazwy',
         value: parentValue,
       });
     }
@@ -170,11 +177,28 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   for (const subtask of subtasks) {
     const parentId = getParentId(subtask);
     if (!parentId || !parentsMap[parentId]) continue;
+
+    const label = getTitle(subtask) || 'Podzadanie';
+
     const value = getValue(subtask);
     if (value !== null) {
       parentsMap[parentId].data.push({
-        label: getTitle(subtask),
+        label,
         value,
+      });
+    } else {
+      // Jeżeli nie ma wartości, można ustawić domyślną np. 1 (opcjonalne)
+      // parentsMap[parentId].data.push({ label, value: 1 });
+    }
+  }
+
+  // Jeśli któryś wykres (rodzic) ma pustą tablicę data (brak wartości),
+  // żeby nie było pustych wykresów, dodaj dummy dane (opcjonalnie)
+  for (const key in parentsMap) {
+    if (parentsMap[key].data.length === 0) {
+      parentsMap[key].data.push({
+        label: 'Brak danych',
+        value: 1,
       });
     }
   }
@@ -183,7 +207,7 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
 }
 
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
+  'Access-Control-Allow-Origin': '*', // na dev możesz zostawić '*', w produkcji daj konkretną domenę
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
