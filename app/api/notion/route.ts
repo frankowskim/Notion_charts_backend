@@ -39,15 +39,18 @@ if (!NOTION_MASTER_DB_URL) {
 
 // Funkcja ekstrakcji ID bazy z pełnego URL Notion (usuwa myślniki)
 function extractDatabaseIdFromUrl(url: string): string {
-  // Przykładowy URL: https://www.notion.so/Workspace/Some-Page-Name-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-  // ID to ostatnie 32 znaki po ostatnim myślniku, ale może zawierać myślniki, więc je usuwamy.
-  const match = url.match(/([a-f0-9]{32}|[a-f0-9\-]{36})$/i);
-  if (!match) {
+  try {
+    const cleanUrl = url.split('?')[0]; // usuwamy parametry zapytania
+    const match = cleanUrl.match(/([0-9a-fA-F]{32}|[0-9a-fA-F\-]{36})$/);
+    if (!match) {
+      throw new Error(`Nie znaleziono ID bazy w adresie: ${url}`);
+    }
+    return match[0].replace(/-/g, ''); // usuwamy myślniki
+  } catch (err) {
     throw new Error('Nie udało się wyciągnąć ID bazy z NOTION_MASTER_DB_URL');
   }
-  // Usuwamy myślniki z ID (Notion wymaga 32 znaków hex bez myślników)
-  return match[0].replace(/-/g, '');
 }
+
 
 const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
 
