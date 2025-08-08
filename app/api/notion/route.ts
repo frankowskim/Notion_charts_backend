@@ -136,7 +136,7 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
 export async function GET() {
   try {
     const databases = await getDatabasesFromMaster();
-
+console.log('Databases from master:', databases);
     const results: ChartsGroupedResponse[] = [];
 
     for (const db of databases) {
