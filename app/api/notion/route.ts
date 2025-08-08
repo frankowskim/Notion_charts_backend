@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Client } from '@notionhq/client';
-import {
-  QueryDatabaseParameters,
-  PageObjectResponse,
-} from '@notionhq/client/build/src/api-endpoints';
+import { QueryDatabaseParameters, PageObjectResponse } from '@notionhq/client/build/src/api-endpoints';
 
 interface MasterDBItem {
   id: string;
@@ -34,7 +31,6 @@ if (!NOTION_MASTER_DB_URL) {
   throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
 }
 
-// Funkcja ekstrakcji ID bazy z pełnego URL Notion (usuwa myślniki)
 function extractDatabaseIdFromUrl(url: string): string {
   try {
     const cleanUrl = url.split('?')[0];
@@ -81,13 +77,11 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
       const urlProp = page.properties['Link do bazy'];
       const activeProp = page.properties['Aktywna'];
 
-      // Name (text)
       const name =
         nameProp.type === 'rich_text'
           ? nameProp.rich_text.map((t) => t.plain_text).join('')
           : '';
 
-      // Database ID extracted from URL (url)
       const url =
         urlProp.type === 'url'
           ? urlProp.url ?? ''
@@ -95,7 +89,6 @@ async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
 
       const databaseId = url ? extractDatabaseIdFromUrl(url) : '';
 
-      // Active (checkbox)
       const active = activeProp.type === 'checkbox' ? activeProp.checkbox : false;
 
       return {
@@ -136,12 +129,16 @@ async function getChartData(databaseId: string): Promise<ChartItem[]> {
   });
 }
 
-const ALLOWED_ORIGIN = 'https://notioncharts.netlify.app';
+// Nagłówki CORS
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+};
 
 export async function GET() {
   try {
     const databases = await getDatabasesFromMaster();
-
     const results: ChartsGroupedResponse[] = [];
 
     for (const db of databases) {
@@ -156,34 +153,25 @@ export async function GET() {
     return new NextResponse(JSON.stringify(results), {
       status: 200,
       headers: {
-        'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        ...CORS_HEADERS,
+        'Content-Type': 'application/json',
       },
     });
   } catch (error) {
     console.error(error);
-    return new NextResponse(
-      JSON.stringify({ error: (error as Error).message }),
-      {
-        status: 500,
-        headers: {
-          'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        },
-      }
-    );
+    return new NextResponse(JSON.stringify({ error: (error as Error).message }), {
+      status: 500,
+      headers: {
+        ...CORS_HEADERS,
+        'Content-Type': 'application/json',
+      },
+    });
   }
 }
 
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
+    headers: CORS_HEADERS,
   });
 }
