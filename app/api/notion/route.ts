@@ -119,36 +119,62 @@ function getTitle(page: PageObjectResponse): string {
 
 function getValue(page: PageObjectResponse): number | null {
   const props = page.properties;
+  console.log('getValue - Properties:', Object.keys(props));
 
-  if ('Total Tasks' in props && props['Total Tasks'].type === 'number' && props['Total Tasks'].number !== null) {
-    return props['Total Tasks'].number;
+  // Sprawdzimy każde pole i jego typ dla debugowania
+  const candidates = ['Total Tasks', '#Total Done', '#Children Done', '%Done', 'IsDone'];
+  for (const key of candidates) {
+    const prop = props[key];
+    if (!prop) continue;
+
+    console.log(`Checking property "${key}" of type "${prop.type}"`);
+
+    if (prop.type === 'number' && prop.number !== null) {
+      console.log(`Found number for "${key}":`, prop.number);
+      return prop.number;
+    }
+    if (prop.type === 'checkbox') {
+      console.log(`Found checkbox for "${key}":`, prop.checkbox);
+      return prop.checkbox ? 1 : 0;
+    }
   }
 
-  if ('#Total Done' in props && props['#Total Done'].type === 'number' && props['#Total Done'].number !== null) {
-    return props['#Total Done'].number;
-  }
-
-  if ('#Children Done' in props && props['#Children Done'].type === 'number' && props['#Children Done'].number !== null) {
-    return props['#Children Done'].number;
-  }
-
-  if ('%Done' in props && props['%Done'].type === 'number' && props['%Done'].number !== null) {
-    return props['%Done'].number;
-  }
-
-  if ('IsDone' in props && props['IsDone'].type === 'checkbox') {
-    return props['IsDone'].checkbox ? 1 : 0;
-  }
-
+  console.log('No value found');
   return null;
 }
 
 function getSlotNumber(page: PageObjectResponse): number | null {
   const slotProp = page.properties['Slot'];
-  if (slotProp && slotProp.type === 'select' && slotProp.select?.name) {
+  if (!slotProp) {
+    console.log('No "Slot" property');
+    return null;
+  }
+  console.log('Slot property type:', slotProp.type);
+
+  // Możliwe typy: select, number, rich_text, title - trzeba to rozpoznać
+  if (slotProp.type === 'select' && slotProp.select?.name) {
     const num = parseInt(slotProp.select.name, 10);
+    console.log('Slot (select) name:', slotProp.select.name, 'parsed to:', num);
     return isNaN(num) ? null : num;
   }
+  if (slotProp.type === 'number' && slotProp.number !== null) {
+    console.log('Slot (number):', slotProp.number);
+    return slotProp.number;
+  }
+  if (slotProp.type === 'rich_text' && slotProp.rich_text.length > 0) {
+    const text = slotProp.rich_text.map(t => t.plain_text).join('');
+    const num = parseInt(text, 10);
+    console.log('Slot (rich_text):', text, 'parsed to:', num);
+    return isNaN(num) ? null : num;
+  }
+  if (slotProp.type === 'title' && slotProp.title.length > 0) {
+    const text = slotProp.title.map(t => t.plain_text).join('');
+    const num = parseInt(text, 10);
+    console.log('Slot (title):', text, 'parsed to:', num);
+    return isNaN(num) ? null : num;
+  }
+
+  console.log('Unknown Slot type or no value');
   return null;
 }
 
