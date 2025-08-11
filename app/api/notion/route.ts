@@ -150,6 +150,17 @@ function getParentId(page: PageObjectResponse): string | null {
 async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
+console.log(`Pobranie stron z bazy ${databaseName} (${databaseId}), znaleziono: ${pages.length}`);
+
+  for (const p of pages) {
+    console.log('--- Strona ---');
+    console.log('ID:', p.id);
+    console.log('Properties keys:', Object.keys(p.properties));
+    // Zobacz strukturę pola, które uważasz za wartość
+    if (p.properties['Ilość']) console.log('Ilość:', p.properties['Ilość']);
+    if (p.properties['Value']) console.log('Value:', p.properties['Value']);
+  }
+
   const parents = pages.filter(p => getSlotNumber(p) !== null);
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
 
