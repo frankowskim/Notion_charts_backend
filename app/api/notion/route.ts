@@ -15,7 +15,7 @@ interface ChartDataPoint {
 }
 
 interface ChartItem {
-  title: string; // "NazwaBazy::NazwaWykresu"
+  title: string;
   slot: number | null;
   data: ChartDataPoint[];
 }
@@ -118,19 +118,17 @@ function getTitle(page: PageObjectResponse): string {
 }
 
 function getValue(page: PageObjectResponse): number | null {
-  // Priorytetowe pola w kolejności
+  // Priorytetowe pola, dopasowane do Twoich baz Notion
   const possibleFields = ['%Done', 'Total Tasks', '#Total Done', 'Value'];
-  
+
   for (const field of possibleFields) {
     const prop = page.properties[field];
-    if (prop?.type === 'number' && prop.number !== null) {
+    if (prop && prop.type === 'number' && prop.number !== null) {
       return prop.number;
     }
   }
-
   return null;
 }
-
 
 function getSlotNumber(page: PageObjectResponse): number | null {
   const slotProp = page.properties['Slot'];
@@ -152,9 +150,7 @@ function getParentId(page: PageObjectResponse): string | null {
 async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
-  // Rodzice to te, które mają slot ustawiony
   const parents = pages.filter(p => getSlotNumber(p) !== null);
-  // Subtaski to te bez slotu
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
 
   const parentsMap: Record<string, ChartItem> = {};
@@ -162,20 +158,15 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   for (const parent of parents) {
     const slot = getSlotNumber(parent);
     if (slot === null) continue;
-
-    const title = getTitle(parent);
-
     parentsMap[parent.id] = {
-      title: `${databaseName}::${title}`,
+      title: `${databaseName}::${getTitle(parent)}`,
       slot,
       data: [],
     };
-
-    // Dodaj wartość rodzica jako jeden punkt danych, jeśli jest dostępna
     const parentValue = getValue(parent);
     if (parentValue !== null) {
       parentsMap[parent.id].data.push({
-        label: title || 'Brak nazwy',
+        label: getTitle(parent),
         value: parentValue,
       });
     }
@@ -184,37 +175,27 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
   for (const subtask of subtasks) {
     const parentId = getParentId(subtask);
     if (!parentId || !parentsMap[parentId]) continue;
-
-    const label = getTitle(subtask) || 'Podzadanie';
-
     const value = getValue(subtask);
     if (value !== null) {
       parentsMap[parentId].data.push({
-        label,
+        label: getTitle(subtask),
         value,
       });
-    } else {
-      // Jeżeli nie ma wartości, można ustawić domyślną np. 1 (opcjonalne)
-      // parentsMap[parentId].data.push({ label, value: 1 });
     }
   }
 
-  // Jeśli któryś wykres (rodzic) ma pustą tablicę data (brak wartości),
-  // żeby nie było pustych wykresów, dodaj dummy dane (opcjonalnie)
-  for (const key in parentsMap) {
-    if (parentsMap[key].data.length === 0) {
-      parentsMap[key].data.push({
-        label: 'Brak danych',
-        value: 1,
-      });
+  // Jeśli dany parent nie ma danych, usuwamy "Brak danych" i zostawiamy pustą tablicę
+  Object.values(parentsMap).forEach(chart => {
+    if (chart.data.length === 0) {
+      chart.data = [];
     }
-  }
+  });
 
   return Object.values(parentsMap).sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
 }
 
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*', // na dev możesz zostawić '*', w produkcji daj konkretną domenę
+  'Access-Control-Allow-Origin': 'https://notioncharts.netlify.app',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
