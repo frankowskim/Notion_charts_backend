@@ -44,7 +44,7 @@ function extractDatabaseIdFromUrl(url: string): string {
 }
 
 const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
-const notion = new Client({ auth: NOTION_TOKEN as string });
+const notion = new Client({ auth: NOTION_TOKEN });
 
 async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
   let cursor: string | undefined = undefined;
@@ -56,19 +56,15 @@ async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
       start_cursor: cursor,
     } as QueryDatabaseParameters);
 
-    // Type guard, by filtrować tylko obiekty z properties
-    const fullPages = response.results.filter(isPageObjectResponse);
+    const fullPages = response.results.filter(
+      (p): p is PageObjectResponse => 'properties' in p
+    );
 
     pages.push(...fullPages);
     cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
   } while (cursor);
 
   return pages;
-}
-
-// Type guard: sprawdza czy obiekt ma properties i id
-function isPageObjectResponse(obj: any): obj is PageObjectResponse {
-  return obj && typeof obj === 'object' && 'properties' in obj && 'id' in obj;
 }
 
 async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
@@ -122,11 +118,28 @@ function getTitle(page: PageObjectResponse): string {
 }
 
 function getValue(page: PageObjectResponse): number | null {
-  // Przykład: szukamy pola "Ilość" typu number (dostosuj nazwę pola do swojej bazy)
-  const valueProp = page.properties['Ilość'] || page.properties['Value'];
-  if (valueProp && valueProp.type === 'number') {
-    return valueProp.number;
+  const props = page.properties;
+
+  if ('Total Tasks' in props && props['Total Tasks'].type === 'number' && props['Total Tasks'].number !== null) {
+    return props['Total Tasks'].number;
   }
+
+  if ('#Total Done' in props && props['#Total Done'].type === 'number' && props['#Total Done'].number !== null) {
+    return props['#Total Done'].number;
+  }
+
+  if ('#Children Done' in props && props['#Children Done'].type === 'number' && props['#Children Done'].number !== null) {
+    return props['#Children Done'].number;
+  }
+
+  if ('%Done' in props && props['%Done'].type === 'number' && props['%Done'].number !== null) {
+    return props['%Done'].number;
+  }
+
+  if ('IsDone' in props && props['IsDone'].type === 'checkbox') {
+    return props['IsDone'].checkbox ? 1 : 0;
+  }
+
   return null;
 }
 
@@ -150,17 +163,6 @@ function getParentId(page: PageObjectResponse): string | null {
 async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
-console.log(`Pobranie stron z bazy ${databaseName} (${databaseId}), znaleziono: ${pages.length}`);
-
-  for (const p of pages) {
-    console.log('--- Strona ---');
-    console.log('ID:', p.id);
-    console.log('Properties keys:', Object.keys(p.properties));
-    // Zobacz strukturę pola, które uważasz za wartość
-    if (p.properties['Ilość']) console.log('Ilość:', p.properties['Ilość']);
-    if (p.properties['Value']) console.log('Value:', p.properties['Value']);
-  }
-
   const parents = pages.filter(p => getSlotNumber(p) !== null);
   const subtasks = pages.filter(p => getSlotNumber(p) === null);
 
@@ -169,11 +171,13 @@ console.log(`Pobranie stron z bazy ${databaseName} (${databaseId}), znaleziono: 
   for (const parent of parents) {
     const slot = getSlotNumber(parent);
     if (slot === null) continue;
+
     parentsMap[parent.id] = {
       title: `${databaseName}::${getTitle(parent)}`,
       slot,
       data: [],
     };
+
     const parentValue = getValue(parent);
     if (parentValue !== null) {
       parentsMap[parent.id].data.push({
@@ -186,21 +190,12 @@ console.log(`Pobranie stron z bazy ${databaseName} (${databaseId}), znaleziono: 
   for (const subtask of subtasks) {
     const parentId = getParentId(subtask);
     if (!parentId || !parentsMap[parentId]) continue;
+
     const value = getValue(subtask);
     if (value !== null) {
       parentsMap[parentId].data.push({
         label: getTitle(subtask),
         value,
-      });
-    }
-  }
-
-  // Jeśli nie ma danych w tablicy data, dodaj "Brak danych" z wartością 1, żeby frontend nie miał pustego wykresu
-  for (const chart of Object.values(parentsMap)) {
-    if (chart.data.length === 0) {
-      chart.data.push({
-        label: 'Brak danych',
-        value: 1,
       });
     }
   }
