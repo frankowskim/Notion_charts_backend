@@ -118,12 +118,19 @@ function getTitle(page: PageObjectResponse): string {
 }
 
 function getValue(page: PageObjectResponse): number | null {
-  const valueProp = page.properties['Value'];
-  if (valueProp && valueProp.type === 'number' && valueProp.number !== null) {
-    return valueProp.number;
+  // Priorytetowe pola w kolejności
+  const possibleFields = ['%Done', 'Total Tasks', '#Total Done', 'Value'];
+  
+  for (const field of possibleFields) {
+    const prop = page.properties[field];
+    if (prop?.type === 'number' && prop.number !== null) {
+      return prop.number;
+    }
   }
+
   return null;
 }
+
 
 function getSlotNumber(page: PageObjectResponse): number | null {
   const slotProp = page.properties['Slot'];
