@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { Client } from '@notionhq/client';
-import { QueryDatabaseParameters, PageObjectResponse } from '@notionhq/client/build/src/api-endpoints';
+import type { PageObjectResponse, QueryDatabaseParameters } from '@notionhq/client/build/src/api-endpoints';
 
 interface MasterDBItem {
   id: string;
@@ -15,7 +15,7 @@ interface ChartDataPoint {
 }
 
 interface ChartItem {
-  title: string; // "NazwaBazy::NazwaWykresu"
+  title: string; // "NazwaBazy::NazwaRodzica"
   slot: number | null;
   data: ChartDataPoint[];
 }
@@ -23,24 +23,14 @@ interface ChartItem {
 const NOTION_TOKEN = process.env.NOTION_TOKEN;
 const NOTION_MASTER_DB_URL = process.env.NOTION_MASTER_DB_URL;
 
-if (!NOTION_TOKEN) {
-  throw new Error('Brak NOTION_TOKEN w zmiennych środowiskowych');
-}
-if (!NOTION_MASTER_DB_URL) {
-  throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
-}
+if (!NOTION_TOKEN) throw new Error('Brak NOTION_TOKEN w zmiennych środowiskowych');
+if (!NOTION_MASTER_DB_URL) throw new Error('Brak NOTION_MASTER_DB_URL w zmiennych środowiskowych');
 
 function extractDatabaseIdFromUrl(url: string): string {
-  try {
-    const cleanUrl = url.split('?')[0];
-    const match = cleanUrl.match(/([0-9a-fA-F]{32}|[0-9a-fA-F\-]{36})$/);
-    if (!match) {
-      throw new Error(`Nie znaleziono ID bazy w adresie: ${url}`);
-    }
-    return match[0].replace(/-/g, '');
-  } catch {
-    throw new Error('Nie udało się wyciągnąć ID bazy z NOTION_MASTER_DB_URL');
-  }
+  const cleanUrl = url.split('?')[0];
+  const match = cleanUrl.match(/([0-9a-fA-F]{32}|[0-9a-fA-F\-]{36})$/);
+  if (!match) throw new Error(`Nie znaleziono ID bazy w adresie: ${url}`);
+  return match[0].replace(/-/g, '');
 }
 
 const MASTER_DB_ID = extractDatabaseIdFromUrl(NOTION_MASTER_DB_URL);
@@ -117,116 +107,108 @@ function getTitle(page: PageObjectResponse): string {
   return '';
 }
 
-function getValue(page: PageObjectResponse): number | null {
-  const props = page.properties;
-  console.log('getValue - Properties:', Object.keys(props));
-
-  // Sprawdzimy każde pole i jego typ dla debugowania
-  const candidates = ['Total Tasks', '#Total Done', '#Children Done', '%Done', 'IsDone'];
-  for (const key of candidates) {
-    const prop = props[key];
-    if (!prop) continue;
-
-    console.log(`Checking property "${key}" of type "${prop.type}"`);
-
-    if (prop.type === 'number' && prop.number !== null) {
-      console.log(`Found number for "${key}":`, prop.number);
-      return prop.number;
-    }
-    if (prop.type === 'checkbox') {
-      console.log(`Found checkbox for "${key}":`, prop.checkbox);
-      return prop.checkbox ? 1 : 0;
-    }
-  }
-
-  console.log('No value found');
-  return null;
-}
-
-function getSlotNumber(page: PageObjectResponse): number | null {
+function getSlot(page: PageObjectResponse): number | null {
   const slotProp = page.properties['Slot'];
-  if (!slotProp) {
-    console.log('No "Slot" property');
-    return null;
-  }
-  console.log('Slot property type:', slotProp.type);
+  if (!slotProp) return null;
 
-  // Możliwe typy: select, number, rich_text, title - trzeba to rozpoznać
   if (slotProp.type === 'select' && slotProp.select?.name) {
     const num = parseInt(slotProp.select.name, 10);
-    console.log('Slot (select) name:', slotProp.select.name, 'parsed to:', num);
-    return isNaN(num) ? null : num;
-  }
-  if (slotProp.type === 'number' && slotProp.number !== null) {
-    console.log('Slot (number):', slotProp.number);
-    return slotProp.number;
-  }
-  if (slotProp.type === 'rich_text' && slotProp.rich_text.length > 0) {
-    const text = slotProp.rich_text.map(t => t.plain_text).join('');
-    const num = parseInt(text, 10);
-    console.log('Slot (rich_text):', text, 'parsed to:', num);
-    return isNaN(num) ? null : num;
-  }
-  if (slotProp.type === 'title' && slotProp.title.length > 0) {
-    const text = slotProp.title.map(t => t.plain_text).join('');
-    const num = parseInt(text, 10);
-    console.log('Slot (title):', text, 'parsed to:', num);
     return isNaN(num) ? null : num;
   }
 
-  console.log('Unknown Slot type or no value');
+  if (slotProp.type === 'number' && typeof slotProp.number === 'number') {
+    return slotProp.number;
+  }
+
   return null;
 }
 
-function getParentId(page: PageObjectResponse): string | null {
-  const parentProp = page.properties['Parent item'];
-  if (parentProp && parentProp.type === 'relation' && parentProp.relation.length > 0) {
-    return parentProp.relation[0].id;
+function getStatus(page: PageObjectResponse): string {
+  const statusProp = page.properties['Status'];
+  if (!statusProp) return 'Brak statusu';
+
+  if (statusProp.type === 'select' && statusProp.select?.name) {
+    return statusProp.select.name;
   }
-  return null;
+
+  if (statusProp.type === 'multi_select' && statusProp.multi_select.length > 0) {
+    return statusProp.multi_select.map(s => s.name).join(', ');
+  }
+
+  if (statusProp.type === 'rich_text' && statusProp.rich_text.length > 0) {
+    return statusProp.rich_text.map(t => t.plain_text).join('') || 'Brak statusu';
+  }
+
+  return 'Brak statusu';
 }
 
 async function getChartData(databaseId: string, databaseName: string): Promise<ChartItem[]> {
   const pages = await getAllPages(databaseId);
 
-  const parents = pages.filter(p => getSlotNumber(p) !== null);
-  const subtasks = pages.filter(p => getSlotNumber(p) === null);
+  // Mapa id rodziców (zadań nadrzędnych) na ich tytuł i slot
+  const parentMap: Record<string, { title: string; slot: number }> = {};
 
-  const parentsMap: Record<string, ChartItem> = {};
-
-  for (const parent of parents) {
-    const slot = getSlotNumber(parent);
+  for (const page of pages) {
+    const slot = getSlot(page);
     if (slot === null) continue;
 
-    parentsMap[parent.id] = {
-      title: `${databaseName}::${getTitle(parent)}`,
+    // Sprawdzamy, czy to rodzic - ma podzadania (#Children liczba większa od 0)
+    const childrenProp = page.properties['#Children'];
+    const isParent = childrenProp && childrenProp.type === 'number' && childrenProp.number && childrenProp.number > 0;
+
+    if (isParent) {
+      parentMap[page.id] = {
+        title: `${databaseName}::${getTitle(page)}`,
+        slot,
+      };
+    }
+  }
+
+  // Zliczamy zadania wg slotu i statusu
+  // Ignorujemy podzadania (te które mają rodzica)
+  const slotStatusCount: Record<number, Record<string, number>> = {};
+
+  for (const page of pages) {
+    // Jeśli zadanie ma rodzica, pomijamy (liczymy tylko zadania główne)
+    const parentProp = page.properties['Parent item'];
+    if (parentProp && parentProp.type === 'relation' && parentProp.relation.length > 0) {
+      continue;
+    }
+
+    const slot = getSlot(page);
+    if (slot === null) continue;
+
+    const status = getStatus(page);
+
+    if (!slotStatusCount[slot]) slotStatusCount[slot] = {};
+    if (!slotStatusCount[slot][status]) slotStatusCount[slot][status] = 0;
+    slotStatusCount[slot][status]++;
+  }
+
+  const charts: ChartItem[] = [];
+
+  for (const [slotStr, statusCounts] of Object.entries(slotStatusCount)) {
+    const slot = parseInt(slotStr, 10);
+
+    // Znajdź tytuł rodzica dla slotu lub fallback
+    const parentEntry = Object.values(parentMap).find(p => p.slot === slot);
+
+    const title = parentEntry ? parentEntry.title : `Slot ${slot}`;
+
+    const data: ChartDataPoint[] = Object.entries(statusCounts).map(([label, value]) => ({
+      label,
+      value,
+    }));
+
+    charts.push({
+      title,
       slot,
-      data: [],
-    };
-
-    const parentValue = getValue(parent);
-    if (parentValue !== null) {
-      parentsMap[parent.id].data.push({
-        label: getTitle(parent),
-        value: parentValue,
-      });
-    }
+      data,
+    });
   }
 
-  for (const subtask of subtasks) {
-    const parentId = getParentId(subtask);
-    if (!parentId || !parentsMap[parentId]) continue;
-
-    const value = getValue(subtask);
-    if (value !== null) {
-      parentsMap[parentId].data.push({
-        label: getTitle(subtask),
-        value,
-      });
-    }
-  }
-
-  return Object.values(parentsMap).sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
+  // Sortuj po slotach rosnąco
+  return charts.sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
 }
 
 const CORS_HEADERS = {
@@ -254,7 +236,7 @@ export async function GET() {
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error('Backend error:', error);
     return new NextResponse(JSON.stringify({ error: (error as Error).message }), {
       status: 500,
       headers: {
