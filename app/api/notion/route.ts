@@ -15,7 +15,7 @@ interface ChartDataPoint {
 }
 
 interface ChartItem {
-  title: string;
+  title: string; // "NazwaBazy::NazwaWykresu"
   slot: number | null;
   data: ChartDataPoint[];
 }
@@ -56,15 +56,19 @@ async function getAllPages(databaseId: string): Promise<PageObjectResponse[]> {
       start_cursor: cursor,
     } as QueryDatabaseParameters);
 
-    const fullPages = response.results.filter(
-      (p): p is PageObjectResponse => 'properties' in p
-    );
+    // Type guard, by filtrować tylko obiekty z properties
+    const fullPages = response.results.filter(isPageObjectResponse);
 
     pages.push(...fullPages);
     cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
   } while (cursor);
 
   return pages;
+}
+
+// Type guard: sprawdza czy obiekt ma properties i id
+function isPageObjectResponse(obj: any): obj is PageObjectResponse {
+  return obj && typeof obj === 'object' && 'properties' in obj && 'id' in obj;
 }
 
 async function getDatabasesFromMaster(): Promise<MasterDBItem[]> {
@@ -118,14 +122,10 @@ function getTitle(page: PageObjectResponse): string {
 }
 
 function getValue(page: PageObjectResponse): number | null {
-  // Priorytetowe pola, dopasowane do Twoich baz Notion
-  const possibleFields = ['%Done', 'Total Tasks', '#Total Done', 'Value'];
-
-  for (const field of possibleFields) {
-    const prop = page.properties[field];
-    if (prop && prop.type === 'number' && prop.number !== null) {
-      return prop.number;
-    }
+  // Przykład: szukamy pola "Ilość" typu number (dostosuj nazwę pola do swojej bazy)
+  const valueProp = page.properties['Ilość'] || page.properties['Value'];
+  if (valueProp && valueProp.type === 'number') {
+    return valueProp.number;
   }
   return null;
 }
@@ -184,12 +184,15 @@ async function getChartData(databaseId: string, databaseName: string): Promise<C
     }
   }
 
-  // Jeśli dany parent nie ma danych, usuwamy "Brak danych" i zostawiamy pustą tablicę
-  Object.values(parentsMap).forEach(chart => {
+  // Jeśli nie ma danych w tablicy data, dodaj "Brak danych" z wartością 1, żeby frontend nie miał pustego wykresu
+  for (const chart of Object.values(parentsMap)) {
     if (chart.data.length === 0) {
-      chart.data = [];
+      chart.data.push({
+        label: 'Brak danych',
+        value: 1,
+      });
     }
-  });
+  }
 
   return Object.values(parentsMap).sort((a, b) => (a.slot ?? 0) - (b.slot ?? 0));
 }
