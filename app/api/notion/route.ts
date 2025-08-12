@@ -39,7 +39,6 @@ function safeGetRelationIds(prop: any): string[] {
   return prop.relation.map((rel: any) => rel.id);
 }
 
-// Funkcja rekurencyjna do zebrania wszystkich podzadań wg relacji Parent item
 function collectSubTasks(allTasks: Task[], parentId: string): Task[] {
   const directSubs = allTasks.filter(t => t.parentIds.includes(parentId));
   let allSubs: Task[] = [...directSubs];
@@ -49,19 +48,37 @@ function collectSubTasks(allTasks: Task[], parentId: string): Task[] {
   return allSubs;
 }
 
+function extractNotionIdFromUrl(urlString: string): string | null {
+  try {
+    const url = new URL(urlString);
+    // Notion id is last part of pathname, but may contain dashes
+    const parts = url.pathname.split('/');
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const part = parts[i];
+      // Notion IDs are 32 znaków (bez kresek) lub 36 ze standardowym UUID z kreskami
+      if (/^[0-9a-fA-F-]{32,36}$/.test(part.replace(/-/g, ''))) {
+        return part;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   try {
     const masterDbUrl = process.env.NOTION_MASTER_DB_URL;
     if (!masterDbUrl) {
-      return NextResponse.json({ error: 'NOTION_MASTER_DB_URL not set' }, { status: 500 });
+      return NextResponse.json({ error: 'NOTION_MASTER_DB_URL env var is missing' }, { status: 500 });
     }
 
-    // Pobierz ID bazy nadrzędnej z URL
-    const url = new URL(masterDbUrl);
-    const pathParts = url.pathname.split('/');
-    const masterDbId = pathParts[pathParts.length - 1];
+    const masterDbId = extractNotionIdFromUrl(masterDbUrl);
+    if (!masterDbId) {
+      return NextResponse.json({ error: 'Cannot extract Notion DB ID from NOTION_MASTER_DB_URL' }, { status: 500 });
+    }
 
-    // Pobierz listę rekordów z bazy nadrzędnej (bazy podrzędne)
+    // Pobierz rekordy z bazy nadrzędnej
     const masterDbResults = await notion.databases.query({
       database_id: masterDbId,
       page_size: 100,
@@ -79,23 +96,13 @@ export async function GET(req: NextRequest) {
       if (masterPage.object !== 'page' || !('properties' in masterPage)) continue;
       const props = (masterPage as any).properties;
 
-      // Pobierz nazwę zadania nadrzędnego (bazy)
       const baseName = safeGetText(props['Nazwa bazy'] || props['Name'] || props['name']);
       if (!baseName) continue;
 
-      // Pobierz link do bazy podrzędnej
       const dbLink = safeGetText(props['Link do bazy']);
       if (!dbLink) continue;
 
-      // Wyciągnij ID bazy podrzędnej z linku
-      let dbId: string | null = null;
-      try {
-        const dbUrl = new URL(dbLink);
-        const parts = dbUrl.pathname.split('/');
-        dbId = parts[parts.length - 1];
-      } catch {
-        continue;
-      }
+      const dbId = extractNotionIdFromUrl(dbLink);
       if (!dbId) continue;
 
       // Pobierz taski z bazy podrzędnej
@@ -104,7 +111,6 @@ export async function GET(req: NextRequest) {
         page_size: 100,
       });
 
-      // Zmapuj taski na obiekty Task
       const allTasks: Task[] = [];
       for (const taskPage of dbQuery.results) {
         if (taskPage.object !== 'page' || !('properties' in taskPage)) continue;
@@ -126,17 +132,12 @@ export async function GET(req: NextRequest) {
         });
       }
 
-      // Wybierz zadania nadrzędne - takie, które nie są sub-taskami lub mają puste parentIds
       const rootTasks = allTasks.filter(t => !t.isSubTask || t.parentIds.length === 0);
 
-      // Twórz wykresy wg każdego root taska z uwzględnieniem sub-tasków
       for (const rootTask of rootTasks) {
         const subTasks = collectSubTasks(allTasks, rootTask.id);
-
-        // Do wykresu wrzucamy zadania rootTask + wszystkie subtaski pod nim
         const relevantTasks = [rootTask, ...subTasks];
 
-        // Grupowanie po statusach
         const statusMap = new Map<string, number>();
         for (const t of relevantTasks) {
           statusMap.set(t.status, (statusMap.get(t.status) || 0) + 1);
@@ -149,7 +150,7 @@ export async function GET(req: NextRequest) {
 
         charts.push({
           title: `${baseName} - ${rootTask.title}`,
-          slot: null, // jeśli masz gdzieś slot to tu go możesz podpiąć
+          slot: null,
           data,
         });
       }
@@ -162,7 +163,7 @@ export async function GET(req: NextRequest) {
 
     return response;
   } catch (error: any) {
-    console.error(error);
+    console.error('Error in API:', error);
     return NextResponse.json({ error: error.message || 'Unknown error' }, { status: 500 });
   }
 }
