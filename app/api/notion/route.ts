@@ -51,13 +51,14 @@ function collectSubTasks(allTasks: Task[], parentId: string): Task[] {
 function extractNotionIdFromUrl(urlString: string): string | null {
   try {
     const url = new URL(urlString);
-    // Notion id is last part of pathname, but may contain dashes
+    // Ścieżka np. /Workspace/Name-dbUUID
     const parts = url.pathname.split('/');
     for (let i = parts.length - 1; i >= 0; i--) {
       const part = parts[i];
-      // Notion IDs are 32 znaków (bez kresek) lub 36 ze standardowym UUID z kreskami
-      if (/^[0-9a-fA-F-]{32,36}$/.test(part.replace(/-/g, ''))) {
-        return part;
+      // Usuwamy wszystko, co nie jest heksadecymalnym UUID (z kreskami)
+      const cleaned = part.replace(/[^0-9a-fA-F-]/g, '');
+      if (/^[0-9a-fA-F]{32}$/.test(cleaned.replace(/-/g, '')) || /^[0-9a-fA-F-]{36}$/.test(cleaned)) {
+        return cleaned;
       }
     }
     return null;
