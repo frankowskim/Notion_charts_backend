@@ -3,23 +3,7 @@ import { Client } from '@notionhq/client';
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
-interface ChartDataPoint {
-  label: string;
-  value: number;
-}
-
-interface ChartItem {
-  title: string; // np. "NazwaBazy::NazwaWykresu"
-  slot: number | null;
-  data: ChartDataPoint[];
-}
-
-interface ApiResponse {
-  charts: ChartItem[];
-}
-
 function safeGetString(prop: any): string {
-  // Funkcja bezpiecznego pobrania tekstu z Notion property (rich_text, title)
   if (!prop) return '';
   if ('title' in prop && prop.title.length > 0) {
     return prop.title.map((t: any) => t.plain_text).join('');
@@ -31,8 +15,21 @@ function safeGetString(prop: any): string {
   return '';
 }
 
+function safeGetCheckbox(prop: any): boolean {
+  if (!prop) return false;
+  if ('checkbox' in prop) return prop.checkbox;
+  return false;
+}
+
+function safeGetRelationIds(prop: any): string[] {
+  if (!prop) return [];
+  if ('relation' in prop && Array.isArray(prop.relation)) {
+    return prop.relation.map((rel: any) => rel.id);
+  }
+  return [];
+}
+
 export async function OPTIONS() {
-  // Obsługa preflight CORS
   return new NextResponse(null, {
     status: 204,
     headers: {
@@ -45,25 +42,18 @@ export async function OPTIONS() {
 
 export async function GET(req: NextRequest) {
   try {
-    // Link do master DB - to jest pełen URL w zmiennej
     const masterDbUrl = process.env.NOTION_MASTER_DB_URL;
     if (!masterDbUrl) throw new Error('NOTION_MASTER_DB_URL not set');
 
-    // W Notion API nie pobieramy DB po URL, tylko po ID - więc musimy wyciągnąć DB ID z masterDbUrl
-    // Zakładam, że masterDbUrl ma formę https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...
-    // Wyciągamy część po "/" a przed "?" jako database ID
     const url = new URL(masterDbUrl);
     const pathnameParts = url.pathname.split('/');
     const masterDbId = pathnameParts[pathnameParts.length - 1];
 
-    // Pobieramy rekordy z master DB, filtrowane po checkboxie "Aktywna"
     const masterDbResults = await notion.databases.query({
       database_id: masterDbId,
       filter: {
         property: 'Aktywna',
-        checkbox: {
-          equals: true,
-        },
+        checkbox: { equals: true },
       },
       sorts: [
         {
@@ -74,21 +64,23 @@ export async function GET(req: NextRequest) {
       page_size: 100,
     });
 
-    // W master DB mamy kolumnę "Link do bazy" (URL do bazy, z której pobieramy dane)
-    // Z niej wyciągamy DB ID analogicznie (ostatni fragment URL ścieżki)
+    type Task = {
+      id: string;
+      title: string;
+      status: string;
+      isSubTask: boolean;
+      parentIds: string[]; // relacja Parent item
+    };
 
-    const charts: ChartItem[] = [];
+    const charts = [];
 
     for (const page of masterDbResults.results) {
       if (page.object !== 'page' || !('properties' in page)) continue;
-
       const properties = (page as any).properties;
       const baseName = safeGetString(properties['Nazwa bazy']);
-      const dbLink = safeGetString(properties['Link do bazy']); // powinien być URL tekstowo
-
+      const dbLink = safeGetString(properties['Link do bazy']);
       if (!dbLink) continue;
 
-      // Wyciągamy DB ID z dbLink URL
       let dbId: string | null = null;
       try {
         const dbUrl = new URL(dbLink);
@@ -97,93 +89,78 @@ export async function GET(req: NextRequest) {
       } catch {
         continue;
       }
-
       if (!dbId) continue;
 
-      // Query do docelowej bazy danych
       const dbQuery = await notion.databases.query({
         database_id: dbId,
         page_size: 100,
       });
 
-      // Mapujemy taski na strukturę:
-      // slot - number | null
-      // status - status zadania (tekst)
-      // title - nazwa zadania
-      // parent item - nazwa slotu (opcjonalnie)
-
-      type Task = {
-        slot: number | null;
-        status: string;
-        title: string;
-      };
-
-      // Parsujemy właściwości z bazy docelowej
+      // Zmapuj taski z bazy podrzędnej
       const tasks: Task[] = [];
 
       for (const taskPage of dbQuery.results) {
         if (taskPage.object !== 'page' || !('properties' in taskPage)) continue;
         const props = (taskPage as any).properties;
 
-        // Pobierz slot - zakładam, że pole "Slot rekordu" jest typu number lub select/number
-        let slot: number | null = null;
-        if (props['Slot rekordu']) {
-          const slotProp = props['Slot rekordu'];
-          // Obsłuż różne typy - number, select, czy tekst
-          if ('number' in slotProp && typeof slotProp.number === 'number') {
-            slot = slotProp.number;
-          } else if ('select' in slotProp && slotProp.select?.name) {
-            const parsed = Number(slotProp.select.name);
-            slot = isNaN(parsed) ? null : parsed;
-          }
-        }
+        const title = safeGetString(props['Nazwa rekordu']);
 
-        // Pobierz status - pole "status rekordu"
         let status = '';
-        if (props['status rekordu'] && 'select' in props['status rekordu'] && props['status rekordu'].select) {
+        if (
+          props['status rekordu'] &&
+          'select' in props['status rekordu'] &&
+          props['status rekordu'].select
+        ) {
           status = props['status rekordu'].select.name;
         }
 
-        // Pobierz tytuł - "Nazwa rekordu"
-        let title = safeGetString(props['Nazwa rekordu']);
+        const isSubTask = safeGetCheckbox(props['IsSubTask']);
+        const parentIds = safeGetRelationIds(props['Parent item']);
 
-        tasks.push({ slot, status, title });
+        tasks.push({
+          id: taskPage.id,
+          title,
+          status,
+          isSubTask,
+          parentIds,
+        });
       }
 
-      // Grupujemy zadania po slotach
-      // Dla każdego slotu tworzymy chart z sumą statusów
-      // slot null traktujemy jako podzadanie - ale w Twoim frontendzie tylko slot !== null tworzy wykres
+      // Wybierz nadrzędne taski (IsSubTask === false)
+      const parentTasks = tasks.filter((t) => !t.isSubTask);
 
-      // Znajdź unikalne sloty, które są liczbami i !== null
-      const uniqueSlots = Array.from(new Set(tasks.filter(t => t.slot !== null).map(t => t.slot as number))).sort((a,b) => a-b);
+      for (const parent of parentTasks) {
+        // Znajdź subtaski które mają w relacji parentIds id nadrzędnego zadania
+        const subtasks = tasks.filter(
+          (t) => t.isSubTask && t.parentIds.includes(parent.id)
+        );
 
-      for (const slotNum of uniqueSlots) {
-        // Weź wszystkie zadania o tym slocie (slot === slotNum)
-        const slotTasks = tasks.filter(t => t.slot === slotNum);
-
-        // Zlicz statusy
+        // Zsumuj statusy nadrzędnego + subtasków
         const statusCounts: Record<string, number> = {
           'Not started': 0,
-          'Await': 0,
+          Await: 0,
           'In progress': 0,
-          'Done': 0,
+          Done: 0,
         };
 
-        for (const task of slotTasks) {
+        const allTasks = [parent, ...subtasks];
+
+        for (const task of allTasks) {
           if (statusCounts[task.status] !== undefined) {
             statusCounts[task.status]++;
           }
         }
 
-        // Tworzymy tytuł wykresu: "NazwaBazy::Slot X" lub jeśli chcesz, możesz wziąć nazwę z zadania z tym slotem (np. tytuł pierwszego zadania)
-        // Załóżmy, że bierzemy tytuł pierwszego zadania w tym slocie jako nazwa wykresu:
-        const chartTitle = `${baseName}::Slot ${slotNum}`;
+        const chartTitle = `${baseName}::${parent.title}`;
 
-        const data: ChartDataPoint[] = Object.entries(statusCounts).map(([label, value]) => ({ label, value }));
+        const data = Object.entries(statusCounts).map(([label, value]) => ({
+          label,
+          value,
+        }));
 
         charts.push({
           title: chartTitle,
-          slot: slotNum,
+          slot: null,
           data,
         });
       }
