@@ -1,15 +1,7 @@
-import { NextResponse } from 'next/server';
-import { Client, PageObjectResponse } from '@notionhq/client';
+import { NextRequest, NextResponse } from 'next/server';
+import { Client } from '@notionhq/client';
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-
-function convertUrlToId(url: string): string {
-  const regex = /([0-9a-f]{32})/;
-  const match = url.match(regex);
-  if (!match) throw new Error('Invalid Notion database URL');
-  const id = match[1];
-  return `${id.slice(0,8)}-${id.slice(8,12)}-${id.slice(12,16)}-${id.slice(16,20)}-${id.slice(20)}`;
-}
 
 interface ChartDataPoint {
   label: string;
@@ -17,152 +9,202 @@ interface ChartDataPoint {
 }
 
 interface ChartItem {
-  title: string;  // format: "NazwaBazy::Slot X"
+  title: string; // np. "NazwaBazy::NazwaWykresu"
   slot: number | null;
   data: ChartDataPoint[];
 }
 
-export async function GET() {
-  const masterDbUrl = process.env.NOTION_MASTER_DB_URL;
-  if (!masterDbUrl) {
-    return NextResponse.json({ error: 'Missing NOTION_MASTER_DB_URL environment variable' }, { status: 500 });
-  }
+interface ApiResponse {
+  charts: ChartItem[];
+}
 
-  let masterDbId: string;
-  try {
-    masterDbId = convertUrlToId(masterDbUrl);
-  } catch (error) {
-    return NextResponse.json({ error: 'Invalid NOTION_MASTER_DB_URL format' }, { status: 500 });
+function safeGetString(prop: any): string {
+  // Funkcja bezpiecznego pobrania tekstu z Notion property (rich_text, title)
+  if (!prop) return '';
+  if ('title' in prop && prop.title.length > 0) {
+    return prop.title.map((t: any) => t.plain_text).join('');
   }
+  if ('rich_text' in prop && prop.rich_text.length > 0) {
+    return prop.rich_text.map((t: any) => t.plain_text).join('');
+  }
+  if (typeof prop === 'string') return prop;
+  return '';
+}
 
-  // Pobierz aktywne bazy z master db
-  let masterQuery;
+export async function OPTIONS() {
+  // Obsługa preflight CORS
+  return new NextResponse(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    },
+  });
+}
+
+export async function GET(req: NextRequest) {
   try {
-    masterQuery = await notion.databases.query({
+    // Link do master DB - to jest pełen URL w zmiennej
+    const masterDbUrl = process.env.NOTION_MASTER_DB_URL;
+    if (!masterDbUrl) throw new Error('NOTION_MASTER_DB_URL not set');
+
+    // W Notion API nie pobieramy DB po URL, tylko po ID - więc musimy wyciągnąć DB ID z masterDbUrl
+    // Zakładam, że masterDbUrl ma formę https://www.notion.so/xxxxxxxxxxxxxxxxxxxxxxxxxxx?v=...
+    // Wyciągamy część po "/" a przed "?" jako database ID
+    const url = new URL(masterDbUrl);
+    const pathnameParts = url.pathname.split('/');
+    const masterDbId = pathnameParts[pathnameParts.length - 1];
+
+    // Pobieramy rekordy z master DB, filtrowane po checkboxie "Aktywna"
+    const masterDbResults = await notion.databases.query({
       database_id: masterDbId,
       filter: {
         property: 'Aktywna',
-        checkbox: { equals: true }
-      }
+        checkbox: {
+          equals: true,
+        },
+      },
+      sorts: [
+        {
+          property: 'Nazwa bazy',
+          direction: 'ascending',
+        },
+      ],
+      page_size: 100,
     });
-  } catch (error) {
-    return NextResponse.json({ error: 'Failed to query master database' }, { status: 500 });
-  }
 
-  // Parsowanie aktywnych baz - filtrujemy tylko pełne PageObjectResponse z properties
-  const activeBases = masterQuery.results
-    .filter((page): page is PageObjectResponse => 'properties' in page)
-    .map(page => {
-      const props = page.properties;
+    // W master DB mamy kolumnę "Link do bazy" (URL do bazy, z której pobieramy dane)
+    // Z niej wyciągamy DB ID analogicznie (ostatni fragment URL ścieżki)
 
-      // Nazwa bazy (tekst)
-      const baseNameProp = props['Nazwa bazy'];
-      let baseName = '';
-      if (baseNameProp?.type === 'title' && baseNameProp.title.length > 0) {
-        baseName = baseNameProp.title[0].plain_text;
-      }
+    const charts: ChartItem[] = [];
 
-      // Link do bazy (url)
-      const baseUrlProp = props['Link do bazy'];
-      let baseUrl: string | undefined;
-      if (baseUrlProp?.type === 'url') {
-        baseUrl = baseUrlProp.url ?? undefined;
-      }
+    for (const page of masterDbResults.results) {
+      if (page.object !== 'page' || !('properties' in page)) continue;
 
-      if (!baseName || !baseUrl) return null;
+      const properties = (page as any).properties;
+      const baseName = safeGetString(properties['Nazwa bazy']);
+      const dbLink = safeGetString(properties['Link do bazy']); // powinien być URL tekstowo
 
+      if (!dbLink) continue;
+
+      // Wyciągamy DB ID z dbLink URL
+      let dbId: string | null = null;
       try {
-        const baseId = convertUrlToId(baseUrl);
-        return { baseName, baseId };
+        const dbUrl = new URL(dbLink);
+        const pathParts = dbUrl.pathname.split('/');
+        dbId = pathParts[pathParts.length - 1];
       } catch {
-        return null;
-      }
-    })
-    .filter((v): v is { baseName: string; baseId: string } => v !== null);
-
-  const charts: ChartItem[] = [];
-
-  for (const base of activeBases) {
-    const dbId = base.baseId;
-
-    // Pobierz wszystkie strony (zadania) z bazy
-    let allTasks: PageObjectResponse[] = [];
-    let cursor: string | undefined = undefined;
-    try {
-      do {
-        const response = await notion.databases.query({
-          database_id: dbId,
-          start_cursor: cursor,
-          page_size: 100
-        });
-        const pages = response.results.filter((page): page is PageObjectResponse => 'properties' in page);
-        allTasks = allTasks.concat(pages);
-        cursor = response.has_more ? response.next_cursor ?? undefined : undefined;
-      } while (cursor);
-    } catch (error) {
-      // Pomiń tę bazę, jeśli błąd pobierania
-      continue;
-    }
-
-    // Grupuj dane wg slot i status
-    // Zakładamy, że:
-    // - Slot to właściwość typu number
-    // - Status to właściwość typu select (nazwy statusów: Not started, Await, In progress, Done)
-
-    const slotStatusMap = new Map<number | null, Map<string, number>>();
-
-    for (const task of allTasks) {
-      const props = task.properties;
-
-      // Pobierz slot (number) lub null
-      let slot: number | null = null;
-      const slotProp = props['Slot'];
-      if (slotProp?.type === 'number') {
-        slot = slotProp.number ?? null;
+        continue;
       }
 
-      // Pobierz status (select.name) lub 'Not started' jako domyślne
-      let status = 'Not started';
-      const statusProp = props['Status'];
-      if (statusProp?.type === 'select' && statusProp.select) {
-        status = statusProp.select.name;
-      }
+      if (!dbId) continue;
 
-      if (!slotStatusMap.has(slot)) slotStatusMap.set(slot, new Map());
-
-      const statusMap = slotStatusMap.get(slot)!;
-      statusMap.set(status, (statusMap.get(status) ?? 0) + 1);
-    }
-
-    // Przygotuj charty
-    for (const [slot, statusMap] of slotStatusMap.entries()) {
-      const allStatuses = ['Not started', 'Await', 'In progress', 'Done'];
-      const data: ChartDataPoint[] = allStatuses.map(s => ({
-        label: s,
-        value: statusMap.get(s) ?? 0
-      }));
-
-      charts.push({
-        title: `${base.baseName}::Slot ${slot === null ? 'null' : slot}`,
-        slot,
-        data
+      // Query do docelowej bazy danych
+      const dbQuery = await notion.databases.query({
+        database_id: dbId,
+        page_size: 100,
       });
+
+      // Mapujemy taski na strukturę:
+      // slot - number | null
+      // status - status zadania (tekst)
+      // title - nazwa zadania
+      // parent item - nazwa slotu (opcjonalnie)
+
+      type Task = {
+        slot: number | null;
+        status: string;
+        title: string;
+      };
+
+      // Parsujemy właściwości z bazy docelowej
+      const tasks: Task[] = [];
+
+      for (const taskPage of dbQuery.results) {
+        if (taskPage.object !== 'page' || !('properties' in taskPage)) continue;
+        const props = (taskPage as any).properties;
+
+        // Pobierz slot - zakładam, że pole "Slot rekordu" jest typu number lub select/number
+        let slot: number | null = null;
+        if (props['Slot rekordu']) {
+          const slotProp = props['Slot rekordu'];
+          // Obsłuż różne typy - number, select, czy tekst
+          if ('number' in slotProp && typeof slotProp.number === 'number') {
+            slot = slotProp.number;
+          } else if ('select' in slotProp && slotProp.select?.name) {
+            const parsed = Number(slotProp.select.name);
+            slot = isNaN(parsed) ? null : parsed;
+          }
+        }
+
+        // Pobierz status - pole "status rekordu"
+        let status = '';
+        if (props['status rekordu'] && 'select' in props['status rekordu'] && props['status rekordu'].select) {
+          status = props['status rekordu'].select.name;
+        }
+
+        // Pobierz tytuł - "Nazwa rekordu"
+        let title = safeGetString(props['Nazwa rekordu']);
+
+        tasks.push({ slot, status, title });
+      }
+
+      // Grupujemy zadania po slotach
+      // Dla każdego slotu tworzymy chart z sumą statusów
+      // slot null traktujemy jako podzadanie - ale w Twoim frontendzie tylko slot !== null tworzy wykres
+
+      // Znajdź unikalne sloty, które są liczbami i !== null
+      const uniqueSlots = Array.from(new Set(tasks.filter(t => t.slot !== null).map(t => t.slot as number))).sort((a,b) => a-b);
+
+      for (const slotNum of uniqueSlots) {
+        // Weź wszystkie zadania o tym slocie (slot === slotNum)
+        const slotTasks = tasks.filter(t => t.slot === slotNum);
+
+        // Zlicz statusy
+        const statusCounts: Record<string, number> = {
+          'Not started': 0,
+          'Await': 0,
+          'In progress': 0,
+          'Done': 0,
+        };
+
+        for (const task of slotTasks) {
+          if (statusCounts[task.status] !== undefined) {
+            statusCounts[task.status]++;
+          }
+        }
+
+        // Tworzymy tytuł wykresu: "NazwaBazy::Slot X" lub jeśli chcesz, możesz wziąć nazwę z zadania z tym slotem (np. tytuł pierwszego zadania)
+        // Załóżmy, że bierzemy tytuł pierwszego zadania w tym slocie jako nazwa wykresu:
+        const chartTitle = `${baseName}::Slot ${slotNum}`;
+
+        const data: ChartDataPoint[] = Object.entries(statusCounts).map(([label, value]) => ({ label, value }));
+
+        charts.push({
+          title: chartTitle,
+          slot: slotNum,
+          data,
+        });
+      }
     }
+
+    const headers = new Headers({
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+    });
+
+    return new Response(JSON.stringify({ charts }), { status: 200, headers });
+  } catch (error) {
+    console.error('Błąd API:', error);
+    return new Response(
+      JSON.stringify({ error: (error as Error).message || 'Unknown error' }),
+      {
+        status: 500,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      }
+    );
   }
-
-  // Sortuj wg nazwy bazy i slotu
-  charts.sort((a, b) => {
-    const [baseA, slotA] = a.title.split('::');
-    const [baseB, slotB] = b.title.split('::');
-
-    if (baseA !== baseB) return baseA.localeCompare(baseB);
-
-    // Slot może być "null" lub "Slot X"
-    const slotANum = a.slot ?? -1;
-    const slotBNum = b.slot ?? -1;
-
-    return slotANum - slotBNum;
-  });
-
-  return NextResponse.json({ charts });
 }
