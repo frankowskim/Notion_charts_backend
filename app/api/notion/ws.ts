@@ -1,7 +1,7 @@
-// backend/api/notion/ws.ts
+// ws.ts
 import { WebSocketServer, WebSocket } from "ws";
 
-let wss: WebSocketServer;
+let wss: WebSocketServer | null = null;
 
 export function initWebSocketServer(server: any) {
   wss = new WebSocketServer({ server });
@@ -17,6 +17,7 @@ export function initWebSocketServer(server: any) {
   });
 }
 
+// Funkcja broadcast może działać nawet jeśli wss nie istnieje
 export function broadcastChartsUpdate(data: any) {
   if (!wss) {
     console.warn(
