@@ -1,8 +1,11 @@
-// ws.ts
+// backend/app/api/notion/ws.ts
 import { WebSocketServer, WebSocket } from "ws";
 
 let wss: WebSocketServer | null = null;
 
+/**
+ * Inicjalizacja WebSocketServer na bazie istniejącego serwera HTTP
+ */
 export function initWebSocketServer(server: any) {
   wss = new WebSocketServer({ server });
 
@@ -17,18 +20,27 @@ export function initWebSocketServer(server: any) {
   });
 }
 
-// Funkcja broadcast może działać nawet jeśli wss nie istnieje
+/**
+ * Wysyła zaktualizowane dane wykresów do wszystkich połączonych klientów
+ */
 export function broadcastChartsUpdate(data: any) {
-  if (!wss) {
+  if (!wss || wss.clients.size === 0) {
     console.warn(
       "WebSocketServer jeszcze nie gotowy – pominięto wysyłkę danych"
     );
     return;
   }
 
+  const payload = JSON.stringify({
+    type: "chartsUpdate",
+    charts: data,
+  });
+
   wss.clients.forEach((client: WebSocket) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(data));
+      client.send(payload);
     }
   });
+
+  console.log(`📤 Wysłano update do ${wss.clients.size} klientów`);
 }

@@ -1,7 +1,7 @@
-// backend/api/notion/route.ts
 import { NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
 import { broadcastChartsUpdate } from "./ws";
+
 type ChartDataPoint = { label: string; value: number };
 type ChartItem = { title: string; slot: number | null; data: ChartDataPoint[] };
 
@@ -67,7 +67,7 @@ function isNotionPage(obj: any): obj is NotionPage {
 async function getAllPages(databaseId32: string): Promise<NotionPage[]> {
   if (!databaseId32) return [];
   const database_id = dashifyId(databaseId32);
-  let start_cursor: string | undefined = undefined;
+  let start_cursor: string | undefined;
   const out: NotionPage[] = [];
 
   do {
@@ -76,12 +76,10 @@ async function getAllPages(databaseId32: string): Promise<NotionPage[]> {
       start_cursor,
       page_size: 100,
     } as any);
-
     const results: any[] = Array.isArray(res.results) ? res.results : [];
     for (const r of results) {
       if (isNotionPage(r)) out.push(r);
     }
-
     if (res.has_more) start_cursor = res.next_cursor ?? undefined;
     else start_cursor = undefined;
   } while (start_cursor);
@@ -160,9 +158,7 @@ function readParentRelationId(p: NotionPage): string | undefined {
   return undefined;
 }
 
-async function readChildDatabasesFromMaster(
-  masterUrl: string
-): Promise<{ name: string; url: string; id32: string }[]> {
+async function readChildDatabasesFromMaster(masterUrl: string) {
   const out: { name: string; url: string; id32: string }[] = [];
   const masterId32 = extractDatabaseIdFromUrl(masterUrl);
   const pages = await getAllPages(masterId32);
@@ -228,7 +224,6 @@ async function readChildDatabasesFromMaster(
         url,
         (err as Error).message
       );
-      continue;
     }
   }
 
@@ -257,8 +252,8 @@ async function buildChartsForDatabase(
 
   for (const page of pages) {
     let targetParentId: string | undefined;
-
     const ownSlot = readSlotNumberFromPage(page);
+
     if (ownSlot !== null) {
       targetParentId = page.id;
     } else {
@@ -277,7 +272,6 @@ async function buildChartsForDatabase(
     }
 
     if (!targetParentId) continue;
-
     const status = readStatusFromPage(page);
     const counts = parentCounts.get(targetParentId);
     if (counts) counts[status] = (counts[status] || 0) + 1;
@@ -299,12 +293,10 @@ async function buildChartsForDatabase(
     return { title, slot, data };
   });
 
-  items.sort((a, b) => {
-    const A = a.slot ?? Number.MAX_SAFE_INTEGER;
-    const B = b.slot ?? Number.MAX_SAFE_INTEGER;
-    return A - B;
-  });
-
+  items.sort(
+    (a, b) =>
+      (a.slot ?? Number.MAX_SAFE_INTEGER) - (b.slot ?? Number.MAX_SAFE_INTEGER)
+  );
   return items;
 }
 
@@ -328,9 +320,7 @@ export async function GET() {
       }
     }
 
-    // Nowy krok: broadcast do klientów WS
-    broadcastChartsUpdate(allCharts);
-
+    broadcastChartsUpdate(allCharts); // poprawne wywołanie WS broadcastu
     return new NextResponse(JSON.stringify({ charts: allCharts }), {
       status: 200,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
