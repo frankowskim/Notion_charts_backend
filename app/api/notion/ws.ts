@@ -1,15 +1,18 @@
 // backend/app/api/notion/ws.ts
 import { WebSocketServer, WebSocket } from "ws";
 
-let wss: WebSocketServer | null = null;
+let wss: WebSocketServer | null = (global as any)._wss || null; // globalny singleton
 
-/**
- * Inicjalizacja WebSocketServer na bazie istniejącego serwera HTTP
- */
 export function initWebSocketServer(server: any) {
-  wss = new WebSocketServer({ server });
+  if (wss) {
+    console.log("⚠️ WebSocketServer już istnieje – pomijam inicjalizację");
+    return wss;
+  }
 
-  console.log(`🚀 WebSocket server initialized`);
+  wss = new WebSocketServer({ server });
+  (global as any)._wss = wss; // zapisz w global
+
+  console.log("🚀 WebSocket server initialized");
 
   wss.on("connection", (ws: WebSocket) => {
     console.log("🔌 Klient połączony z WebSocketem");
@@ -18,11 +21,10 @@ export function initWebSocketServer(server: any) {
       console.log("❌ Klient rozłączony z WebSocketem");
     });
   });
+
+  return wss;
 }
 
-/**
- * Wysyła zaktualizowane dane wykresów do wszystkich połączonych klientów
- */
 export function broadcastChartsUpdate(data: any) {
   if (!wss || wss.clients.size === 0) {
     console.warn(
