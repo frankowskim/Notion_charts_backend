@@ -9,7 +9,7 @@ export function initWebSocketServer(server: any) {
     return wss;
   }
 
-  wss = new WebSocketServer({ server });
+  wss = new WebSocketServer({ server, path: "/api/notion/ws" });
   (global as any)._wss = wss; // zapisz w global
 
   console.log("🚀 WebSocket server initialized");
