@@ -3,37 +3,33 @@ import { Server as HTTPServer } from "http";
 import WebSocket, { WebSocketServer } from "ws";
 
 let wss: WebSocketServer | null = null;
-const clients = new Set<WebSocket>();
 
 export function initWebSocketServer(server: HTTPServer) {
-  if (wss) return; // już zainicjalizowany
+  if (wss) return; // zapobiega wielokrotnej inicjalizacji
 
   wss = new WebSocketServer({ server });
+  console.log("🟢 WebSocketServer gotowy");
 
-  wss.on("connection", (ws: WebSocket) => {
-    clients.add(ws);
-    console.log("🔌 Nowe połączenie WebSocket");
+  wss.on("connection", (ws) => {
+    console.log("🔌 Klient WS połączony");
 
     ws.on("close", () => {
-      clients.delete(ws);
-      console.log("❌ Połączenie WebSocket zamknięte");
+      console.log("❌ Klient WS rozłączony");
     });
   });
 }
 
-// Ta funkcja musi istnieć, bo route.ts jej używa
 export function broadcastChartsUpdate(data: any) {
-  if (!wss || clients.size === 0) {
-    console.log(
+  if (!wss) {
+    console.warn(
       "WebSocketServer jeszcze nie gotowy – pominięto wysyłkę danych"
     );
     return;
   }
 
-  const message = JSON.stringify(data);
-  clients.forEach((client) => {
+  wss.clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
+      client.send(JSON.stringify(data));
     }
   });
 }
