@@ -1,48 +1,39 @@
-// backend/app/api/notion/ws.ts
-import { WebSocketServer, WebSocket } from "ws";
+// app/api/notion/ws.ts
+import { Server as HTTPServer } from "http";
+import WebSocket, { WebSocketServer } from "ws";
 
-let wss: WebSocketServer | null = (global as any)._wss || null; // globalny singleton
+let wss: WebSocketServer | null = null;
+const clients = new Set<WebSocket>();
 
-export function initWebSocketServer(server: any) {
-  if (wss) {
-    console.log("⚠️ WebSocketServer już istnieje – pomijam inicjalizację");
-    return wss;
-  }
+export function initWebSocketServer(server: HTTPServer) {
+  if (wss) return; // już zainicjalizowany
 
-  wss = new WebSocketServer({ server, path: "/api/notion/ws" });
-  (global as any)._wss = wss; // zapisz w global
-
-  console.log("🚀 WebSocket server initialized");
+  wss = new WebSocketServer({ server });
 
   wss.on("connection", (ws: WebSocket) => {
-    console.log("🔌 Klient połączony z WebSocketem");
+    clients.add(ws);
+    console.log("🔌 Nowe połączenie WebSocket");
 
     ws.on("close", () => {
-      console.log("❌ Klient rozłączony z WebSocketem");
+      clients.delete(ws);
+      console.log("❌ Połączenie WebSocket zamknięte");
     });
   });
-
-  return wss;
 }
 
+// Ta funkcja musi istnieć, bo route.ts jej używa
 export function broadcastChartsUpdate(data: any) {
-  if (!wss || wss.clients.size === 0) {
-    console.warn(
+  if (!wss || clients.size === 0) {
+    console.log(
       "WebSocketServer jeszcze nie gotowy – pominięto wysyłkę danych"
     );
     return;
   }
 
-  const payload = JSON.stringify({
-    type: "chartsUpdate",
-    charts: data,
-  });
-
-  wss.clients.forEach((client: WebSocket) => {
+  const message = JSON.stringify(data);
+  clients.forEach((client) => {
     if (client.readyState === WebSocket.OPEN) {
-      client.send(payload);
+      client.send(message);
     }
   });
-
-  console.log(`📤 Wysłano update do ${wss.clients.size} klientów`);
 }
