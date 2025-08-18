@@ -320,7 +320,9 @@ export async function GET() {
       }
     }
 
-    broadcastChartsUpdate(allCharts); // poprawne wywołanie WS broadcastu
+    // 🔥 poprawka — przekazujemy argument
+    broadcastChartsUpdate(allCharts);
+
     return new NextResponse(JSON.stringify({ charts: allCharts }), {
       status: 200,
       headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
