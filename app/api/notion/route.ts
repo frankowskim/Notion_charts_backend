@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { Client } from "@notionhq/client";
-import { broadcastChartsUpdate } from "./ws";
 
 type ChartDataPoint = { label: string; value: number };
 type ChartItem = { title: string; slot: number | null; data: ChartDataPoint[] };
@@ -319,9 +318,6 @@ export async function GET() {
         console.error("Błąd dla bazy:", child.name, err);
       }
     }
-
-    // 🔥 poprawka — przekazujemy argument
-    broadcastChartsUpdate(allCharts);
 
     return new NextResponse(JSON.stringify({ charts: allCharts }), {
       status: 200,
